@@ -17,6 +17,7 @@ import {
   CheckCircle,
   Clock,
   AlertTriangle,
+  RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -259,6 +260,15 @@ export default function PayrollPage() {
       open: true,
       title: "Process Payroll",
       description: `Are you sure you want to process payroll for "${periodName}"? This will process all employee attendance and generate payroll items.`,
+      action: () => performCalculatePayroll(periodId),
+    })
+  }
+
+  const handleRecalculatePayroll = (periodId: string, periodName: string) => {
+    setConfirmDialog({
+      open: true,
+      title: "Recalculate Payroll",
+      description: `Are you sure you want to recalculate payroll for "${periodName}"? This will update all existing payroll items with current data.`,
       action: () => performCalculatePayroll(periodId),
     })
   }
@@ -690,16 +700,25 @@ export default function PayrollPage() {
                                         disabled={calculating}
                                       >
                                         <Calculator className="mr-2 h-4 w-4" />
-                                        Process
+                                        Process Payroll
                                       </DropdownMenuItem>
                                     ) : (
-                                      <DropdownMenuItem 
-                                        onClick={() => handleCloseEntry(period.id, period.name)}
-                                        disabled={calculating}
-                                      >
-                                        <CheckCircle className="mr-2 h-4 w-4" />
-                                        Close Period
-                                      </DropdownMenuItem>
+                                      <>
+                                        <DropdownMenuItem
+                                          onClick={() => handleRecalculatePayroll(period.id, period.name)}
+                                          disabled={calculating}
+                                        >
+                                          <RefreshCw className="mr-2 h-4 w-4" />
+                                          Recalculate
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem 
+                                          onClick={() => handleCloseEntry(period.id, period.name)}
+                                          disabled={calculating}
+                                        >
+                                          <CheckCircle className="mr-2 h-4 w-4" />
+                                          Close Period
+                                        </DropdownMenuItem>
+                                      </>
                                     )}
                                   </>
                                 )}
@@ -772,15 +791,35 @@ export default function PayrollPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>
-                  {isEmployee ? "My Payslips" : "Payroll Items"}
-                </CardTitle>
-                <CardDescription>
-                  {isEmployee 
-                    ? "View your payroll history and download payslips"
-                    : `${filteredPayrollItems.length} payroll item${filteredPayrollItems.length !== 1 ? 's' : ''} found`
-                  }
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>
+                      {isEmployee ? "My Payslips" : "Payroll Items"}
+                    </CardTitle>
+                    <CardDescription>
+                      {isEmployee 
+                        ? "View your payroll history and download payslips"
+                        : `${filteredPayrollItems.length} payroll item${filteredPayrollItems.length !== 1 ? 's' : ''} found`
+                      }
+                    </CardDescription>
+                  </div>
+                  {isAdmin && selectedPeriod !== "all" && filteredPayrollItems.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const period = payrollPeriods.find(p => p.id === selectedPeriod)
+                        if (period) {
+                          handleRecalculatePayroll(period.id, period.name)
+                        }
+                      }}
+                      disabled={calculating}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Recalculate All
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <Table>
@@ -788,6 +827,7 @@ export default function PayrollPage() {
                     <TableRow>
                       {isAdmin && <TableHead>Employee</TableHead>}
                       <TableHead>Period</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Basic Pay</TableHead>
                       <TableHead>Overtime</TableHead>
                       <TableHead>Holiday Pay</TableHead>
@@ -827,6 +867,11 @@ export default function PayrollPage() {
                               {new Date(item.payrollPeriod.endDate).toLocaleDateString()}
                             </div>
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={item.payrollPeriod.status === 'DRAFT' ? 'secondary' : 'destructive'}>
+                            {item.payrollPeriod.status === 'DRAFT' ? 'Processed' : 'Closed'}
+                          </Badge>
                         </TableCell>
                         <TableCell>{formatCurrency(item.basicPay)}</TableCell>
                         <TableCell>{formatCurrency(item.overtimePay)}</TableCell>

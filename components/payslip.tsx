@@ -188,14 +188,6 @@ export function Payslip({ isOpen, onClose, payslipData }: PayslipProps) {
                     <span>OVERTIME:</span>
                     <span>{formatCurrency(payslipData.overtimePay)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>13th MONTH:</span>
-                    <span>0.00</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>ALLOWANCE:</span>
-                    <span>0.00</span>
-                  </div>
                   <div className="flex justify-between border-t border-black pt-1">
                     <span className="font-bold">GROSS PAY:</span>
                     <span className="font-bold">{formatCurrency(payslipData.grossPay)}</span>
@@ -369,14 +361,6 @@ function generatePayslipHTML(payslipData: PayslipData): string {
                 <div class="flex justify-between">
                   <span>OVERTIME:</span>
                   <span>${formatCurrency(payslipData.overtimePay)}</span>
-                </div>
-                <div class="flex justify-between">
-                  <span>13th MONTH:</span>
-                  <span>0.00</span>
-                </div>
-                <div class="flex justify-between">
-                  <span>ALLOWANCE:</span>
-                  <span>0.00</span>
                 </div>
                 <div class="flex justify-between border-t pt-1">
                   <span class="font-bold">GROSS PAY:</span>

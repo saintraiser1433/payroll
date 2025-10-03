@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
+import { calculatePhilippineTax } from '@/lib/philippine-tax'
 
 const calculatePayrollSchema = z.object({
   payrollPeriodId: z.string().min(1, 'Payroll period ID is required'),
@@ -252,25 +253,39 @@ export async function POST(request: NextRequest) {
       let totalDeductions = 0
       const deductions = []
 
-      // Add standard deduction types
-      for (const deductionType of deductionTypes) {
-        let deductionAmount = 0
-
-        if (deductionType.isFixed) {
-          deductionAmount = deductionType.amount || 0
-        } else {
-          // Percentage-based deduction
-          deductionAmount = (totalEarnings * (deductionType.amount || 0)) / 100
-        }
-
-        if (deductionAmount > 0) {
+      // Apply Philippine Progressive Tax System
+      const withholdingTaxType = deductionTypes.find(dt => dt.name === "Withholding Tax")
+      
+      if (withholdingTaxType) {
+        // Calculate progressive tax based on annual income
+        const taxCalculation = calculatePhilippineTax(safeTotalEarnings, employee.salaryType)
+        
+        if (taxCalculation.monthlyTax > 0) {
           deductions.push({
-            deductionTypeId: deductionType.id,
-            amount: deductionAmount
+            deductionTypeId: withholdingTaxType.id,
+            amount: taxCalculation.monthlyTax
           })
-          totalDeductions += deductionAmount
+          totalDeductions += taxCalculation.monthlyTax
+          
+          console.log(`✅ Applied Philippine progressive tax: ₱${taxCalculation.monthlyTax.toFixed(2)}`)
+          console.log(`   Annual taxable income: ₱${taxCalculation.annualTaxableIncome.toLocaleString()}`)
+          console.log(`   Effective tax rate: ${taxCalculation.effectiveRate.toFixed(2)}%`)
+          console.log(`   Tax brackets used: ${taxCalculation.bracketBreakdown.length}`)
+          
+          if (taxCalculation.bracketBreakdown.length > 0) {
+            console.log(`   Tax breakdown:`)
+            taxCalculation.bracketBreakdown.forEach(bracket => {
+              console.log(`     ${bracket.bracket}: ₱${bracket.taxAmount.toFixed(2)} (${bracket.taxRate}%)`)
+            })
+          }
+        } else {
+          console.log(`ℹ️  Employee exempt from tax (below ₱250,000 annual exemption)`)
         }
       }
+
+      // Note: SSS, PhilHealth, and Pag-IBIG are now manual deductions
+      // They will only be applied if explicitly assigned to employees via benefits
+      console.log(`ℹ️  SSS, PhilHealth, and Pag-IBIG deductions are now manual - only applied when assigned to employees`)
 
       // Add benefit deductions (employee contributions) - only if net pay won't be negative
       let benefitDeductions = 0

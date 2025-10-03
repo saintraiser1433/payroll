@@ -1170,6 +1170,7 @@ export default function AttendancePage() {
                   </TableHead>
                   <TableHead>Break Out</TableHead>
                   <TableHead>Break In</TableHead>
+                  <TableHead>Midbreak</TableHead>
                   <TableHead 
                     className="cursor-pointer hover:bg-muted/50 select-none"
                     onClick={() => handleSort('timeOut')}
@@ -1309,14 +1310,15 @@ export default function AttendancePage() {
                     // Calculate actual work time first
                     const grossWorkMinutes = Math.floor((actualEnd.getTime() - actualStart.getTime()) / (1000 * 60))
                     const breakMinutes = record.breakMinutes || 0
-                    totalMinutes = Math.max(0, grossWorkMinutes - breakMinutes)
                     
-                    // TEST: Force totalMinutes to 1 for debugging
-                    totalMinutes = 1
+                    // Apply 30-minute break rule: only deduct break time if it exceeds 30 minutes
+                    const deductibleBreakMinutes = breakMinutes > 30 ? breakMinutes - 30 : 0
+                    totalMinutes = Math.max(0, grossWorkMinutes - deductibleBreakMinutes)
                     
                     console.log('Basic calculation result:', {
                       grossWorkMinutes,
                       breakMinutes,
+                      deductibleBreakMinutes,
                       totalMinutes
                     })
                     
@@ -1354,7 +1356,10 @@ export default function AttendancePage() {
                       // Total credited hours = actual work time (not schedule duration)
                       const grossWorkMinutes = Math.floor((actualEnd.getTime() - actualStart.getTime()) / (1000 * 60))
                       const breakMinutes = record.breakMinutes || 0
-                      totalMinutes = Math.max(0, grossWorkMinutes - breakMinutes)
+                      
+                      // Apply 30-minute break rule: only deduct break time if it exceeds 30 minutes
+                      const deductibleBreakMinutes = breakMinutes > 30 ? breakMinutes - 30 : 0
+                      totalMinutes = Math.max(0, grossWorkMinutes - deductibleBreakMinutes)
                       
                       console.log('Total hours calculation debug (with schedule):', {
                         employeeId: record.employee.id,
@@ -1364,6 +1369,7 @@ export default function AttendancePage() {
                         scheduleMinutes,
                         grossWorkMinutes,
                         breakMinutes,
+                        deductibleBreakMinutes,
                         totalMinutes,
                         lateMinutes,
                         overtimeMinutes,
@@ -1373,12 +1379,16 @@ export default function AttendancePage() {
                       // No schedule found - use actual work time as total hours
                       const grossWorkMinutes = Math.floor((actualEnd.getTime() - actualStart.getTime()) / (1000 * 60))
                       const breakMinutes = record.breakMinutes || 0
-                      totalMinutes = Math.max(0, grossWorkMinutes - breakMinutes)
+                      
+                      // Apply 30-minute break rule: only deduct break time if it exceeds 30 minutes
+                      const deductibleBreakMinutes = breakMinutes > 30 ? breakMinutes - 30 : 0
+                      totalMinutes = Math.max(0, grossWorkMinutes - deductibleBreakMinutes)
                       
                       console.log('Total hours calculation debug (no schedule):', {
                         employeeId: record.employee.id,
                         grossWorkMinutes,
                         breakMinutes,
+                        deductibleBreakMinutes,
                         totalMinutes,
                         actualStart: actualStart.toISOString(),
                         actualEnd: actualEnd.toISOString(),
@@ -1452,6 +1462,15 @@ export default function AttendancePage() {
                       <TableCell>{formatTime(record.timeIn)}</TableCell>
                       <TableCell>{formatTime(record.breakOut || null)}</TableCell>
                       <TableCell>{formatTime(record.breakIn || null)}</TableCell>
+                      <TableCell>
+                        {record.breakMinutes && record.breakMinutes > 0 ? (
+                          <span className="text-purple-600 font-medium">
+                            {formatDuration(record.breakMinutes)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell>{formatTime(record.timeOut)}</TableCell>
                       <TableCell>{getStatusBadge(record.status)}</TableCell>
                       <TableCell>

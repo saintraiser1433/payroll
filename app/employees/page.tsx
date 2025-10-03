@@ -183,6 +183,7 @@ export default function EmployeesPage() {
   const [employeeBenefits, setEmployeeBenefits] = useState<EmployeeBenefit[]>([])
   const [isBenefitDialogOpen, setIsBenefitDialogOpen] = useState(false)
   const [selectedEmployeeForBenefit, setSelectedEmployeeForBenefit] = useState<Employee | null>(null)
+  const [benefitDialogMode, setBenefitDialogMode] = useState<'view' | 'assign'>('assign')
   const [benefitFormData, setBenefitFormData] = useState({
     benefitId: "",
     startDate: new Date().toISOString().split('T')[0],
@@ -508,11 +509,19 @@ export default function EmployeesPage() {
 
   const handleAssignBenefit = (employee: Employee) => {
     setSelectedEmployeeForBenefit(employee)
+    setBenefitDialogMode('assign')
     setBenefitFormData({
       benefitId: "",
       startDate: new Date().toISOString().split('T')[0],
       endDate: ""
     })
+    setIsBenefitDialogOpen(true)
+  }
+
+  const handleViewBenefits = (employee: Employee) => {
+    setSelectedEmployeeForBenefit(employee)
+    setBenefitDialogMode('view')
+    fetchEmployeeBenefits(employee.id)
     setIsBenefitDialogOpen(true)
   }
 
@@ -994,6 +1003,10 @@ export default function EmployeesPage() {
                                               <Edit className="mr-2 h-4 w-4" />
                                               Edit
                                             </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleViewBenefits(employee)}>
+                                              <Shield className="mr-2 h-4 w-4" />
+                                              View Benefits
+                                            </DropdownMenuItem>
                                             <DropdownMenuItem onClick={() => handleAssignBenefit(employee)}>
                                               <Shield className="mr-2 h-4 w-4" />
                                               Assign Benefit
@@ -1358,58 +1371,99 @@ export default function EmployeesPage() {
         <Dialog open={isBenefitDialogOpen} onOpenChange={setIsBenefitDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Assign Benefit</DialogTitle>
+              <DialogTitle>
+                {benefitDialogMode === 'view' ? 'View Benefits' : 'Assign Benefit'}
+              </DialogTitle>
               <DialogDescription>
-                Assign a benefit to {selectedEmployeeForBenefit?.firstName} {selectedEmployeeForBenefit?.lastName}
+                {benefitDialogMode === 'view' 
+                  ? `Benefits assigned to ${selectedEmployeeForBenefit?.firstName} ${selectedEmployeeForBenefit?.lastName}`
+                  : `Assign a benefit to ${selectedEmployeeForBenefit?.firstName} ${selectedEmployeeForBenefit?.lastName}`
+                }
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="benefit">Benefit</Label>
-                <Select
-                  value={benefitFormData.benefitId}
-                  onValueChange={(value) => setBenefitFormData({ ...benefitFormData, benefitId: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a benefit" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {benefits.filter(benefit => benefit.isActive).map((benefit) => (
-                      <SelectItem key={benefit.id} value={benefit.id}>
-                        {benefit.name} - ₱{benefit.employeeContribution.toFixed(2)} employee contribution
-                      </SelectItem>
+            
+            {benefitDialogMode === 'view' ? (
+              // View mode - show existing benefits
+              <div className="space-y-4">
+                {employeeBenefits.length === 0 ? (
+                  <div className="text-center py-4 text-muted-foreground">
+                    No benefits assigned to this employee.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {employeeBenefits.map((empBenefit) => (
+                      <div key={empBenefit.id} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div>
+                          <div className="font-medium">{empBenefit.benefit.name}</div>
+                          <div className="text-sm text-muted-foreground">
+                            Employee Contribution: ₱{empBenefit.benefit.employeeContribution.toFixed(2)}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            Start: {new Date(empBenefit.startDate).toLocaleDateString()}
+                            {empBenefit.endDate && ` - End: ${new Date(empBenefit.endDate).toLocaleDateString()}`}
+                          </div>
+                        </div>
+                        <Badge variant={empBenefit.isActive ? "default" : "secondary"}>
+                          {empBenefit.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </div>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </div>
+                )}
               </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="startDate">Start Date</Label>
-                <Input
-                  id="startDate"
-                  type="date"
-                  value={benefitFormData.startDate}
-                  onChange={(e) => setBenefitFormData({ ...benefitFormData, startDate: e.target.value })}
-                />
+            ) : (
+              // Assign mode - show form
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="benefit">Benefit</Label>
+                  <Select
+                    value={benefitFormData.benefitId}
+                    onValueChange={(value) => setBenefitFormData({ ...benefitFormData, benefitId: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a benefit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {benefits.filter(benefit => benefit.isActive).map((benefit) => (
+                        <SelectItem key={benefit.id} value={benefit.id}>
+                          {benefit.name} - ₱{benefit.employeeContribution.toFixed(2)} employee contribution
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="startDate">Start Date</Label>
+                  <Input
+                    id="startDate"
+                    type="date"
+                    value={benefitFormData.startDate}
+                    onChange={(e) => setBenefitFormData({ ...benefitFormData, startDate: e.target.value })}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="endDate">End Date (Optional)</Label>
+                  <Input
+                    id="endDate"
+                    type="date"
+                    value={benefitFormData.endDate}
+                    onChange={(e) => setBenefitFormData({ ...benefitFormData, endDate: e.target.value })}
+                  />
+                </div>
               </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="endDate">End Date (Optional)</Label>
-                <Input
-                  id="endDate"
-                  type="date"
-                  value={benefitFormData.endDate}
-                  onChange={(e) => setBenefitFormData({ ...benefitFormData, endDate: e.target.value })}
-                />
-              </div>
-            </div>
+            )}
+            
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsBenefitDialogOpen(false)}>
-                Cancel
+                {benefitDialogMode === 'view' ? 'Close' : 'Cancel'}
               </Button>
-              <Button onClick={handleSaveBenefit} disabled={!benefitFormData.benefitId}>
-                Assign Benefit
-              </Button>
+              {benefitDialogMode === 'assign' && (
+                <Button onClick={handleSaveBenefit} disabled={!benefitFormData.benefitId}>
+                  Assign Benefit
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
