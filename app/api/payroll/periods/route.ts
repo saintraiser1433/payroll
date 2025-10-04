@@ -21,13 +21,55 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '10')
+    const search = searchParams.get('search')
     const status = searchParams.get('status')
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
+    const minAmount = searchParams.get('minAmount')
+    const maxAmount = searchParams.get('maxAmount')
+    const minEmployees = searchParams.get('minEmployees')
+    const maxEmployees = searchParams.get('maxEmployees')
+    const sortField = searchParams.get('sortField')
+    const sortDirection = searchParams.get('sortDirection') || 'desc'
 
     const skip = (page - 1) * limit
 
     const where: any = {}
-    if (status) {
+    
+    // Search filter
+    if (search) {
+      where.name = {
+        contains: search,
+        mode: 'insensitive'
+      }
+    }
+    
+    // Status filter
+    if (status && status !== 'all') {
       where.status = status
+    }
+
+    // Date range filter
+    if (startDate || endDate) {
+      where.startDate = {
+        ...(startDate && { gte: new Date(startDate) }),
+        ...(endDate && { lte: new Date(endDate) })
+      }
+    }
+
+    // Determine orderBy clause
+    let orderBy: any = { createdAt: 'desc' } // Default sorting
+    if (sortField) {
+      if (sortField === 'name') {
+        orderBy = { name: sortDirection }
+      } else if (sortField === 'startDate') {
+        orderBy = { startDate: sortDirection }
+      } else if (sortField === 'status') {
+        orderBy = { status: sortDirection }
+      } else if (sortField === 'createdAt') {
+        orderBy = { createdAt: sortDirection }
+      }
+      // Note: employeeCount, totalEarnings, totalDeductions, totalNetPay will be sorted after calculation
     }
 
     const [periods, total] = await Promise.all([
@@ -53,13 +95,13 @@ export async function GET(request: NextRequest) {
             }
           }
         },
-        orderBy: { createdAt: 'desc' }
+        orderBy
       }),
       prisma.payrollPeriod.count({ where })
     ])
 
     // Calculate totals for each period
-    const periodsWithTotals = periods.map(period => {
+    let periodsWithTotals = periods.map(period => {
       const totalEarnings = period.payrollItems.reduce((sum, item) => sum + item.totalEarnings, 0)
       const totalDeductions = period.payrollItems.reduce((sum, item) => sum + item.totalDeductions, 0)
       const totalNetPay = period.payrollItems.reduce((sum, item) => sum + item.netPay, 0)
@@ -73,13 +115,66 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    // Apply amount and employee count filters after calculating totals
+    if (minAmount || maxAmount) {
+      periodsWithTotals = periodsWithTotals.filter(period => {
+        const netPay = period.totalNetPay
+        if (minAmount && netPay < parseFloat(minAmount)) return false
+        if (maxAmount && netPay > parseFloat(maxAmount)) return false
+        return true
+      })
+    }
+
+    if (minEmployees || maxEmployees) {
+      periodsWithTotals = periodsWithTotals.filter(period => {
+        const employeeCount = period.employeeCount
+        if (minEmployees && employeeCount < parseInt(minEmployees)) return false
+        if (maxEmployees && employeeCount > parseInt(maxEmployees)) return false
+        return true
+      })
+    }
+
+    // Apply sorting for calculated fields
+    if (sortField && ['employeeCount', 'totalEarnings', 'totalDeductions', 'totalNetPay'].includes(sortField)) {
+      periodsWithTotals.sort((a, b) => {
+        let aValue: number, bValue: number
+        
+        switch (sortField) {
+          case 'employeeCount':
+            aValue = a.employeeCount
+            bValue = b.employeeCount
+            break
+          case 'totalEarnings':
+            aValue = a.totalEarnings
+            bValue = b.totalEarnings
+            break
+          case 'totalDeductions':
+            aValue = a.totalDeductions
+            bValue = b.totalDeductions
+            break
+          case 'totalNetPay':
+            aValue = a.totalNetPay
+            bValue = b.totalNetPay
+            break
+          default:
+            return 0
+        }
+        
+        if (sortDirection === 'asc') {
+          return aValue - bValue
+        } else {
+          return bValue - aValue
+        }
+      })
+    }
+
     return NextResponse.json({
       periods: periodsWithTotals,
       pagination: {
         page,
         limit,
-        total,
-        pages: Math.ceil(total / limit)
+        total: periodsWithTotals.length, // Use filtered count
+        pages: Math.ceil(periodsWithTotals.length / limit)
       }
     })
   } catch (error) {

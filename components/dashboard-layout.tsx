@@ -5,7 +5,7 @@ import type React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
-import { Search, Bell, Home, Users, Building2, Clock, DollarSign, BarChart3, Settings, Calendar, ArrowRight, UserCheck, LogOut, Shield, CalendarDays } from "lucide-react"
+import { Search, Home, Users, Building2, Clock, DollarSign, BarChart3, Calendar, ArrowRight, UserCheck, LogOut, Shield, CalendarDays } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -19,7 +19,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ThemeToggle } from "@/components/theme-toggle"
 
-const navigation = [
+// Role-based navigation menus
+const adminNavigation = [
   { name: "Dashboard", href: "/", icon: Home },
   { name: "Employees", href: "/employees", icon: Users },
   { name: "Departments", href: "/departments", icon: Building2 },
@@ -30,7 +31,14 @@ const navigation = [
   { name: "Payroll", href: "/payroll", icon: DollarSign },
   { name: "Benefits", href: "/benefits", icon: Shield },
   { name: "Analytics", href: "/analytics", icon: BarChart3 },
-  { name: "Settings", href: "/settings", icon: Settings },
+]
+
+const departmentHeadNavigation = [
+  { name: "Dashboard", href: "/department-head-dashboard", icon: Home },
+]
+
+const employeeNavigation = [
+  { name: "Dashboard", href: "/employee-dashboard", icon: Home },
 ]
 
 interface DashboardLayoutProps {
@@ -40,6 +48,24 @@ interface DashboardLayoutProps {
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname()
   const { data: session } = useSession()
+
+  // Get navigation based on user role
+  const getNavigation = () => {
+    if (!session?.user?.role) return []
+    
+    switch (session.user.role) {
+      case 'ADMIN':
+        return adminNavigation
+      case 'DEPARTMENT_HEAD':
+        return departmentHeadNavigation
+      case 'EMPLOYEE':
+        return employeeNavigation
+      default:
+        return []
+    }
+  }
+
+  const navigation = getNavigation()
 
   const handleSignOut = () => {
     signOut({ callbackUrl: "/auth/signin" })
@@ -51,14 +77,23 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       <header className="h-16 border-b border-border bg-background px-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-purple-600 to-blue-600 rounded-lg flex items-center justify-center">
-              <UserCheck className="w-4 h-4 text-white" />
+            <div className="w-8 h-8 rounded-lg overflow-hidden">
+              <img 
+                src="/logo.png" 
+                alt="DBE Beach Resort Logo" 
+                className="w-full h-full object-contain"
+              />
             </div>
-            <span className="font-semibold text-foreground">PYROL</span>
+            <span className="font-semibold text-foreground">DBE Beach Resort</span>
           </div>
           <div className="text-sm text-muted-foreground">
-            <span>Dashboard</span> <span className="mx-1">/</span>
-            <span className="capitalize">{pathname === "/" ? "Overview" : pathname.slice(1)}</span>
+            <span className="capitalize">{session?.user?.role?.replace('_', ' ') || 'Dashboard'}</span> <span className="mx-1">/</span>
+            <span className="capitalize">
+              {pathname === "/" ? "Overview" : 
+               pathname === "/department-head-dashboard" ? "Department Dashboard" :
+               pathname === "/employee-dashboard" ? "Employee Dashboard" :
+               pathname.slice(1)}
+            </span>
           </div>
         </div>
 
@@ -71,30 +106,47 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             />
           </div>
           <ThemeToggle />
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="w-4 h-4" />
-            <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon">
                 <Avatar className="w-8 h-8">
-                  <AvatarImage src="/placeholder.svg?height=32&width=32" />
-                  <AvatarFallback>AE</AvatarFallback>
+                  <AvatarImage src="/placeholder-user.jpg" alt="User Avatar" />
+                  <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white text-xs font-semibold">
+                    {session?.user?.name ? 
+                      session.user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) :
+                      session?.user?.email ? 
+                        session.user.email.slice(0, 2).toUpperCase() :
+                        'U'
+                    }
+                  </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>
-                {session?.user?.name || "User"}
-                <div className="text-xs text-muted-foreground font-normal">
-                  {session?.user?.role || "Employee"}
+                <div className="flex items-center gap-2">
+                  <Avatar className="w-8 h-8">
+                    <AvatarImage src="/placeholder-user.jpg" alt="User Avatar" />
+                    <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white text-xs font-semibold">
+                      {session?.user?.name ? 
+                        session.user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) :
+                        session?.user?.email ? 
+                          session.user.email.slice(0, 2).toUpperCase() :
+                          'U'
+                      }
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <div className="font-medium">{session?.user?.name || "User"}</div>
+                    <div className="text-xs text-muted-foreground font-normal">
+                      {session?.user?.email || "user@example.com"}
+                    </div>
+                    <div className="text-xs text-primary font-medium">
+                      {session?.user?.role?.replace('_', ' ') || "Employee"}
+                    </div>
+                  </div>
                 </div>
               </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>Profile</DropdownMenuItem>
-              <DropdownMenuItem>Settings</DropdownMenuItem>
-              <DropdownMenuItem>Support</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleSignOut}>
                 <LogOut className="w-4 h-4 mr-2" />

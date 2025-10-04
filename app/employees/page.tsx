@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useSession } from "next-auth/react"
-import { Plus, Search, MoreHorizontal, Edit, UserX, UserCheck, Eye, Users, Building2, Calendar, DollarSign, Shield, X } from "lucide-react"
+import { Plus, Search, MoreHorizontal, Edit, UserX, UserCheck, Eye, Users, Building2, Calendar, DollarSign, Shield, X, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -73,6 +73,11 @@ interface Employee {
   schedule?: {
     id: string
     name: string
+  }
+  user?: {
+    id: string
+    email: string
+    role: string
   }
 }
 
@@ -164,6 +169,7 @@ export default function EmployeesPage() {
     firstName: "",
     lastName: "",
     email: "",
+    password: "",
     phone: "",
     address: "",
     position: "",
@@ -173,7 +179,10 @@ export default function EmployeesPage() {
     hireDate: "",
     departmentId: "",
     scheduleId: "",
+    role: "EMPLOYEE",
   })
+
+  const [showPassword, setShowPassword] = useState(false)
 
   const isAdmin = session?.user?.role === "ADMIN"
   const [userDepartment, setUserDepartment] = useState<string | null>(null)
@@ -327,6 +336,11 @@ export default function EmployeesPage() {
 
       if (!response.ok) {
         const error = await response.json()
+        // Show specific validation error if available
+        if (error.details && error.details.length > 0) {
+          const firstError = error.details[0]
+          throw new Error(firstError.message || error.error || 'Failed to save employee')
+        }
         throw new Error(error.error || 'Failed to save employee')
       }
 
@@ -360,6 +374,7 @@ export default function EmployeesPage() {
       firstName: employee.firstName,
       lastName: employee.lastName,
       email: employee.email,
+      password: "", // Don't populate password when editing
       phone: employee.phone || "",
       address: employee.address || "",
       position: employee.position,
@@ -369,7 +384,9 @@ export default function EmployeesPage() {
       hireDate: employee.hireDate.split('T')[0],
       departmentId: employee.department?.id || "",
       scheduleId: employee.schedule?.id || "",
+      role: employee.user?.role || "EMPLOYEE", // Use actual role from user data
     })
+    setShowPassword(false)
     setIsDialogOpen(true)
   }
 
@@ -453,6 +470,7 @@ export default function EmployeesPage() {
       firstName: "",
       lastName: "",
       email: "",
+      password: "",
       phone: "",
       address: "",
       position: "",
@@ -462,7 +480,9 @@ export default function EmployeesPage() {
       hireDate: "",
       departmentId: "",
       scheduleId: "",
+      role: "EMPLOYEE",
     })
+    setShowPassword(false)
     setEditingEmployee(null)
   }
 
@@ -654,6 +674,52 @@ export default function EmployeesPage() {
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                         required
                       />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          type={showPassword ? "text" : "password"}
+                          value={formData.password}
+                          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                          placeholder={editingEmployee ? "Leave blank to keep current password" : "Minimum 6 characters"}
+                          required={!editingEmployee}
+                          className="pr-10"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? (
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Eye className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="role">Role</Label>
+                      <Select
+                        value={formData.role}
+                        onValueChange={(value) => setFormData({ ...formData, role: value })}
+                        required
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="EMPLOYEE">Employee</SelectItem>
+                          <SelectItem value="DEPARTMENT_HEAD">Department Head</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                   

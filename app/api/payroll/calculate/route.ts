@@ -249,106 +249,117 @@ export async function POST(request: NextRequest) {
         console.log(`- Basic pay after adjustments: ₱${safeBasicPay.toFixed(2)}`)
       }
 
-      // Calculate deductions
-      let totalDeductions = 0
-      const deductions = []
-
-      // Apply Philippine Progressive Tax System
-      const withholdingTaxType = deductionTypes.find(dt => dt.name === "Withholding Tax")
-      
-      if (withholdingTaxType) {
-        // Calculate progressive tax based on annual income
-        const taxCalculation = calculatePhilippineTax(safeTotalEarnings, employee.salaryType)
-        
-        if (taxCalculation.monthlyTax > 0) {
-          deductions.push({
-            deductionTypeId: withholdingTaxType.id,
-            amount: taxCalculation.monthlyTax
-          })
-          totalDeductions += taxCalculation.monthlyTax
-          
-          console.log(`✅ Applied Philippine progressive tax: ₱${taxCalculation.monthlyTax.toFixed(2)}`)
-          console.log(`   Annual taxable income: ₱${taxCalculation.annualTaxableIncome.toLocaleString()}`)
-          console.log(`   Effective tax rate: ${taxCalculation.effectiveRate.toFixed(2)}%`)
-          console.log(`   Tax brackets used: ${taxCalculation.bracketBreakdown.length}`)
-          
-          if (taxCalculation.bracketBreakdown.length > 0) {
-            console.log(`   Tax breakdown:`)
-            taxCalculation.bracketBreakdown.forEach(bracket => {
-              console.log(`     ${bracket.bracket}: ₱${bracket.taxAmount.toFixed(2)} (${bracket.taxRate}%)`)
-            })
-          }
-        } else {
-          console.log(`ℹ️  Employee exempt from tax (below ₱250,000 annual exemption)`)
-        }
-      }
-
-      // Note: SSS, PhilHealth, and Pag-IBIG are now manual deductions
-      // They will only be applied if explicitly assigned to employees via benefits
-      console.log(`ℹ️  SSS, PhilHealth, and Pag-IBIG deductions are now manual - only applied when assigned to employees`)
-
-      // Add benefit deductions (employee contributions) - only if net pay won't be negative
-      let benefitDeductions = 0
-      let tempTotalDeductions = totalDeductions
-      
-      console.log(`\nProcessing benefits for ${employee.firstName} ${employee.lastName}:`)
-      console.log(`- Total Earnings: ₱${totalEarnings}`)
-      console.log(`- Current Deductions: ₱${totalDeductions}`)
-      console.log(`- Employee Benefits: ${employee.employeeBenefits.length}`)
-      
-      for (const employeeBenefit of employee.employeeBenefits) {
-        if (employeeBenefit.benefit.isActive && employeeBenefit.benefit.employeeContribution > 0) {
-          // Check if adding this benefit deduction would result in negative net pay
-          const potentialNetPay = totalEarnings - (tempTotalDeductions + employeeBenefit.benefit.employeeContribution)
-          
-          console.log(`- Benefit: ${employeeBenefit.benefit.name} (₱${employeeBenefit.benefit.employeeContribution})`)
-          console.log(`- Potential Net Pay: ₱${potentialNetPay}`)
-          
-          if (potentialNetPay >= 0) {
-            benefitDeductions += employeeBenefit.benefit.employeeContribution
-            tempTotalDeductions += employeeBenefit.benefit.employeeContribution
-            
-            console.log(`✅ Adding ${employeeBenefit.benefit.name} benefit deduction`)
-            
-            // Create or find specific deduction type for this benefit
-            let benefitDeductionType = await prisma.deductionType.findFirst({
-              where: { name: employeeBenefit.benefit.name }
-            })
-            
-            if (!benefitDeductionType) {
-              benefitDeductionType = await prisma.deductionType.create({
-                data: {
-                  name: employeeBenefit.benefit.name,
-                  description: `Employee contribution for ${employeeBenefit.benefit.name} benefit`,
-                  amount: 0,
-                  isFixed: false
-                }
-              })
-            }
-            
-            // Add benefit as a deduction entry
-            deductions.push({
-              deductionTypeId: benefitDeductionType.id,
-              amount: employeeBenefit.benefit.employeeContribution,
-              benefitName: employeeBenefit.benefit.name
-            })
-          } else {
-            // Log when benefit is skipped due to negative net pay
-            console.log(`❌ Skipping ${employeeBenefit.benefit.name} benefit - would result in negative net pay (₱${potentialNetPay})`)
-          }
-        }
-      }
-      
-      totalDeductions += benefitDeductions
-      console.log(`- Final Benefit Deductions: ₱${benefitDeductions}`)
-      console.log(`- Final Total Deductions: ₱${totalDeductions}`)
-
-      // Add cash advances as deductions
+      // Calculate cash advances total (always needed for reporting)
       const cashAdvanceTotal = employee.cashAdvances.reduce(
         (sum, advance) => sum + advance.amount,
         0
       )
-      totalDeductions += cashAdvanceTotal
+
+      // Calculate deductions - only if deductions are enabled for this period
+      let totalDeductions = 0
+      const deductions = []
+
+      if (payrollPeriod.deductionsEnabled) {
+        console.log(`\n🔧 Deductions ENABLED for period "${payrollPeriod.name}" - applying all deductions`)
+        
+        // Apply Philippine Progressive Tax System
+        const withholdingTaxType = deductionTypes.find(dt => dt.name === "Withholding Tax")
+        
+        if (withholdingTaxType) {
+          // Calculate progressive tax based on annual income
+          const taxCalculation = calculatePhilippineTax(safeTotalEarnings, employee.salaryType)
+          
+          if (taxCalculation.monthlyTax > 0) {
+            deductions.push({
+              deductionTypeId: withholdingTaxType.id,
+              amount: taxCalculation.monthlyTax
+            })
+            totalDeductions += taxCalculation.monthlyTax
+            
+            console.log(`✅ Applied Philippine progressive tax: ₱${taxCalculation.monthlyTax.toFixed(2)}`)
+            console.log(`   Annual taxable income: ₱${taxCalculation.annualTaxableIncome.toLocaleString()}`)
+            console.log(`   Effective tax rate: ${taxCalculation.effectiveRate.toFixed(2)}%`)
+            console.log(`   Tax brackets used: ${taxCalculation.bracketBreakdown.length}`)
+            
+            if (taxCalculation.bracketBreakdown.length > 0) {
+              console.log(`   Tax breakdown:`)
+              taxCalculation.bracketBreakdown.forEach(bracket => {
+                console.log(`     ${bracket.bracket}: ₱${bracket.taxAmount.toFixed(2)} (${bracket.taxRate}%)`)
+              })
+            }
+          } else {
+            console.log(`ℹ️  Employee exempt from tax (below ₱250,000 annual exemption)`)
+          }
+        }
+
+        // Note: SSS, PhilHealth, and Pag-IBIG are now manual deductions
+        // They will only be applied if explicitly assigned to employees via benefits
+        console.log(`ℹ️  SSS, PhilHealth, and Pag-IBIG deductions are now manual - only applied when assigned to employees`)
+
+        // Add benefit deductions (employee contributions) - only if net pay won't be negative
+        let benefitDeductions = 0
+        let tempTotalDeductions = totalDeductions
+        
+        console.log(`\nProcessing benefits for ${employee.firstName} ${employee.lastName}:`)
+        console.log(`- Total Earnings: ₱${totalEarnings}`)
+        console.log(`- Current Deductions: ₱${totalDeductions}`)
+        console.log(`- Employee Benefits: ${employee.employeeBenefits.length}`)
+        
+        for (const employeeBenefit of employee.employeeBenefits) {
+          if (employeeBenefit.benefit.isActive && employeeBenefit.benefit.employeeContribution > 0) {
+            // Check if adding this benefit deduction would result in negative net pay
+            const potentialNetPay = totalEarnings - (tempTotalDeductions + employeeBenefit.benefit.employeeContribution)
+            
+            console.log(`- Benefit: ${employeeBenefit.benefit.name} (₱${employeeBenefit.benefit.employeeContribution})`)
+            console.log(`- Potential Net Pay: ₱${potentialNetPay}`)
+            
+            if (potentialNetPay >= 0) {
+              benefitDeductions += employeeBenefit.benefit.employeeContribution
+              tempTotalDeductions += employeeBenefit.benefit.employeeContribution
+              
+              console.log(`✅ Adding ${employeeBenefit.benefit.name} benefit deduction`)
+              
+              // Create or find specific deduction type for this benefit
+              let benefitDeductionType = await prisma.deductionType.findFirst({
+                where: { name: employeeBenefit.benefit.name }
+              })
+              
+              if (!benefitDeductionType) {
+                benefitDeductionType = await prisma.deductionType.create({
+                  data: {
+                    name: employeeBenefit.benefit.name,
+                    description: `Employee contribution for ${employeeBenefit.benefit.name} benefit`,
+                    amount: 0,
+                    isFixed: false
+                  }
+                })
+              }
+              
+              // Add benefit as a deduction entry
+              deductions.push({
+                deductionTypeId: benefitDeductionType.id,
+                amount: employeeBenefit.benefit.employeeContribution,
+                benefitName: employeeBenefit.benefit.name
+              })
+            } else {
+              // Log when benefit is skipped due to negative net pay
+              console.log(`❌ Skipping ${employeeBenefit.benefit.name} benefit - would result in negative net pay (₱${potentialNetPay})`)
+            }
+          }
+        }
+        
+        totalDeductions += benefitDeductions
+        console.log(`- Final Benefit Deductions: ₱${benefitDeductions}`)
+        console.log(`- Final Total Deductions: ₱${totalDeductions}`)
+
+        // Add cash advances as deductions
+        totalDeductions += cashAdvanceTotal
+      } else {
+        console.log(`\n🚫 Deductions DISABLED for period "${payrollPeriod.name}" - skipping all deductions`)
+        console.log(`- Total Earnings: ₱${totalEarnings}`)
+        console.log(`- Deductions Applied: ₱0 (disabled)`)
+        console.log(`- Net Pay: ₱${totalEarnings}`)
+      }
 
       // Ensure net pay is never negative
       const netPay = Math.max(0, totalEarnings - totalDeductions)
@@ -412,14 +423,17 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Mark cash advances as paid
-      if (employee.cashAdvances.length > 0) {
+      // Mark cash advances as paid - only if deductions are enabled
+      if (employee.cashAdvances.length > 0 && payrollPeriod.deductionsEnabled) {
         await prisma.cashAdvance.updateMany({
           where: {
             id: { in: employee.cashAdvances.map(ca => ca.id) }
           },
           data: { isPaid: true }
         })
+        console.log(`✅ Marked ${employee.cashAdvances.length} cash advances as paid for ${employee.firstName} ${employee.lastName}`)
+      } else if (employee.cashAdvances.length > 0 && !payrollPeriod.deductionsEnabled) {
+        console.log(`ℹ️  Cash advances not marked as paid - deductions disabled for period "${payrollPeriod.name}"`)
       }
 
       payrollItems.push({

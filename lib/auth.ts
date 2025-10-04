@@ -28,11 +28,27 @@ export const authOptions: NextAuthOptions = {
           })
 
           if (!user) {
+            console.log('User not found:', credentials.email)
             return null
           }
 
+          console.log('User found:', { 
+            id: user.id, 
+            email: user.email, 
+            role: user.role,
+            passwordLength: user.password.length,
+            employeeId: user.employee?.id 
+          })
+
           // Verify password
           const isPasswordValid = await bcrypt.compare(credentials.password, user.password)
+          
+          console.log('Password verification:', { 
+            email: credentials.email,
+            isValid: isPasswordValid,
+            inputPasswordLength: credentials.password.length,
+            storedPasswordLength: user.password.length
+          })
 
           if (!isPasswordValid) {
             return null
@@ -65,6 +81,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.role = user.role
         token.employeeId = user.employeeId
+        token.name = user.name
       }
       return token
     },
@@ -73,6 +90,7 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.sub!
         session.user.role = token.role as string
         session.user.employeeId = token.employeeId as string
+        session.user.name = token.name as string
       }
       return session
     },

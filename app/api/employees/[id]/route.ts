@@ -3,21 +3,24 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
+import bcrypt from 'bcryptjs'
 
 const employeeUpdateSchema = z.object({
   employeeId: z.string().min(1, 'Employee ID is required').optional(),
   firstName: z.string().min(1, 'First name is required').optional(),
   lastName: z.string().min(1, 'Last name is required').optional(),
   email: z.string().email('Valid email is required').optional(),
+  password: z.string().optional().transform(val => val === '' ? undefined : val).refine(val => !val || val.length >= 6, 'Password must be at least 6 characters'),
   phone: z.string().optional(),
   address: z.string().optional(),
   position: z.string().min(1, 'Position is required').optional(),
   jobDescription: z.string().optional(),
-  salaryGradeId: z.string().optional(),
+  salaryGradeId: z.string().optional().transform(val => val === '' ? undefined : val),
   salaryType: z.enum(['HOURLY', 'DAILY', 'MONTHLY']).optional(),
-  hireDate: z.string().transform((str) => new Date(str)).optional(),
-  departmentId: z.string().optional(),
-  scheduleId: z.string().optional(),
+  hireDate: z.string().optional().transform(str => str === '' ? undefined : str ? new Date(str) : undefined),
+  departmentId: z.string().optional().transform(val => val === '' ? undefined : val),
+  scheduleId: z.string().optional().transform(val => val === '' ? undefined : val),
+  role: z.enum(['EMPLOYEE', 'DEPARTMENT_HEAD']).optional(),
   isActive: z.boolean().optional(),
 })
 
@@ -87,9 +90,24 @@ export async function PUT(
     const body = await request.json()
     const validatedData = employeeUpdateSchema.parse(body)
 
+    console.log('Employee update request:', {
+      employeeId: id,
+      receivedData: {
+        email: validatedData.email,
+        password: validatedData.password ? '***PROVIDED***' : 'NOT_PROVIDED',
+        passwordLength: validatedData.password?.length || 0,
+        role: validatedData.role
+      }
+    })
+
     // Check if employee exists
     const existingEmployee = await prisma.employee.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        user: {
+          select: { id: true, email: true, role: true }
+        }
+      }
     })
 
     if (!existingEmployee) {
@@ -98,6 +116,14 @@ export async function PUT(
         { status: 404 }
       )
     }
+
+    console.log('Existing employee data:', {
+      employeeId: existingEmployee.id,
+      email: existingEmployee.email,
+      userId: existingEmployee.userId,
+      userEmail: existingEmployee.user?.email,
+      userRole: existingEmployee.user?.role
+    })
 
     // Check if employee ID already exists (if being updated)
     if (validatedData.employeeId && validatedData.employeeId !== existingEmployee.employeeId) {
@@ -113,13 +139,13 @@ export async function PUT(
       }
     }
 
-    // Check if email already exists (if being updated)
+    // Check if email already exists in users table (if being updated)
     if (validatedData.email && validatedData.email !== existingEmployee.email) {
-      const duplicateEmail = await prisma.employee.findUnique({
+      const duplicateUser = await prisma.user.findUnique({
         where: { email: validatedData.email }
       })
 
-      if (duplicateEmail) {
+      if (duplicateUser) {
         return NextResponse.json(
           { error: 'Email already exists' },
           { status: 400 }
@@ -127,19 +153,102 @@ export async function PUT(
       }
     }
 
-    const employee = await prisma.employee.update({
-      where: { id },
-      data: validatedData,
-      include: {
-        department: true,
-        schedule: true,
-        user: {
-          select: { id: true, email: true, role: true }
+    // Prepare employee data (exclude password and role from employee update)
+    const { password, role, ...employeeData } = validatedData
+
+    // Update employee and user in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update employee
+      const employee = await tx.employee.update({
+        where: { id },
+        data: employeeData,
+        include: {
+          department: true,
+          schedule: true,
+          user: {
+            select: { id: true, email: true, role: true }
+          }
+        }
+      })
+
+      // Handle user creation/update if password, role, or email is provided
+      if (password || role || validatedData.email) {
+        if (existingEmployee.userId) {
+          // Update existing user
+          const userUpdateData: any = {}
+          
+          if (password) {
+            const hashedPassword = await bcrypt.hash(password, 12)
+            userUpdateData.password = hashedPassword
+            console.log('Password update:', { 
+              userId: existingEmployee.userId, 
+              email: existingEmployee.email,
+              passwordLength: password.length,
+              hashedPasswordLength: hashedPassword.length 
+            })
+          }
+          
+          if (role) {
+            userUpdateData.role = role
+          }
+
+          // Update email if it's different from the current user email
+          if (validatedData.email && validatedData.email !== existingEmployee.user?.email) {
+            userUpdateData.email = validatedData.email
+            console.log('Email update:', {
+              userId: existingEmployee.userId,
+              oldEmail: existingEmployee.user?.email,
+              newEmail: validatedData.email
+            })
+          }
+
+          const updatedUser = await tx.user.update({
+            where: { id: existingEmployee.userId },
+            data: userUpdateData
+          })
+          
+          console.log('User updated successfully:', { 
+            userId: updatedUser.id, 
+            email: updatedUser.email,
+            role: updatedUser.role 
+          })
+        } else {
+          // Create new user for employee
+          console.log('Creating new user for employee:', {
+            employeeId: existingEmployee.id,
+            email: validatedData.email || existingEmployee.email,
+            role: role || 'EMPLOYEE'
+          })
+
+          const hashedPassword = password ? await bcrypt.hash(password, 12) : await bcrypt.hash('default123', 12)
+          
+          const newUser = await tx.user.create({
+            data: {
+              email: validatedData.email || existingEmployee.email,
+              password: hashedPassword,
+              role: role || 'EMPLOYEE',
+            }
+          })
+
+          // Update employee with new userId
+          await tx.employee.update({
+            where: { id: existingEmployee.id },
+            data: { userId: newUser.id }
+          })
+
+          console.log('New user created successfully:', { 
+            userId: newUser.id, 
+            email: newUser.email,
+            role: newUser.role,
+            employeeId: existingEmployee.id
+          })
         }
       }
+
+      return employee
     })
 
-    return NextResponse.json(employee)
+    return NextResponse.json(result)
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

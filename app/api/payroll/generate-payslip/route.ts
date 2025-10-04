@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session || session.user?.role !== 'ADMIN') {
+    if (!session || !['ADMIN', 'DEPARTMENT_HEAD', 'EMPLOYEE'].includes(session.user?.role || '')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -42,10 +42,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Payroll item not found' }, { status: 404 })
     }
 
+    // For EMPLOYEE role, ensure they can only access their own payroll items
+    if (session.user?.role === 'EMPLOYEE') {
+      const employee = await prisma.employee.findFirst({
+        where: { userId: session.user.id }
+      })
+      
+      if (!employee || employee.id !== payrollItem.employeeId) {
+        return NextResponse.json({ error: 'Unauthorized - You can only access your own payslips' }, { status: 403 })
+      }
+    }
+
     // Calculate payslip data
     const payslipData = {
-      companyName: 'DBEEPM',
-      companyFullName: 'DENNIS BEJARASCO EMPLEO EMPLOYEE AND PAYROLL MANAGEMENT SYSTEM',
+      companyName: 'DBE Beach Resort',
+      companyFullName: 'DBE BEACH RESORT - EMPLOYEE PAYROLL MANAGEMENT SYSTEM',
       period: payrollItem.payrollPeriod,
       employee: payrollItem.employee,
       basicPay: payrollItem.basicPay,

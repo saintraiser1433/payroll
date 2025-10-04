@@ -8,9 +8,9 @@ import { Toaster } from '@/components/ui/toaster'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'PYROL - Employee & Payroll Management System',
-  description: 'Comprehensive employee and payroll management system by Dennis Bejarasco',
-  generator: 'PYROL',
+  title: 'DBE Beach Resort - Employee & Payroll Management System',
+  description: 'Comprehensive employee and payroll management system for DBE Beach Resort',
+  generator: 'DBE Beach Resort',
 }
 
 export default function RootLayout({

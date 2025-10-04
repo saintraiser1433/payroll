@@ -15,6 +15,18 @@ export async function seedDatabase() {
       },
     })
 
+    // Create department head user
+    const deptHeadPassword = await bcrypt.hash("dept123", 12)
+    const deptHeadUser = await prisma.user.upsert({
+      where: { email: "depthead@pyrol.com" },
+      update: {},
+      create: {
+        email: "depthead@pyrol.com",
+        password: deptHeadPassword,
+        role: "DEPARTMENT_HEAD",
+      },
+    })
+
     // Create employee user
     const employeePassword = await bcrypt.hash("emp123", 12)
     const employeeUser = await prisma.user.upsert({
@@ -62,6 +74,27 @@ export async function seedDatabase() {
       })
     }
 
+    // Create salary grades
+    const adminSalaryGrade = await prisma.salaryGrade.upsert({
+      where: { grade: "A1" },
+      update: {},
+      create: {
+        grade: "A1",
+        description: "Administrative Grade 1",
+        salaryRate: 80000,
+      },
+    })
+
+    const empSalaryGrade = await prisma.salaryGrade.upsert({
+      where: { grade: "B1" },
+      update: {},
+      create: {
+        grade: "B1",
+        description: "Employee Grade 1",
+        salaryRate: 50000,
+      },
+    })
+
     // Create admin employee profile
     await prisma.employee.upsert({
       where: { employeeId: "ADMIN001" },
@@ -73,13 +106,39 @@ export async function seedDatabase() {
         email: "admin@pyrol.com",
         phone: "+63 912 345 6789",
         position: "System Administrator",
-        salaryRate: 80000,
         salaryType: "MONTHLY",
         hireDate: new Date("2023-01-01"),
         userId: admin.id,
         departmentId: itDepartment.id,
         scheduleId: regularSchedule.id,
+        salaryGradeId: adminSalaryGrade.id,
       },
+    })
+
+    // Create department head employee profile
+    const deptHeadEmployee = await prisma.employee.upsert({
+      where: { employeeId: "DEPT001" },
+      update: {},
+      create: {
+        employeeId: "DEPT001",
+        firstName: "Jane",
+        lastName: "Smith",
+        email: "depthead@pyrol.com",
+        phone: "+63 912 345 6791",
+        position: "IT Department Head",
+        salaryType: "MONTHLY",
+        hireDate: new Date("2023-02-01"),
+        userId: deptHeadUser.id,
+        departmentId: itDepartment.id,
+        scheduleId: regularSchedule.id,
+        salaryGradeId: adminSalaryGrade.id,
+      },
+    })
+
+    // Update IT department to have a head
+    await prisma.department.update({
+      where: { id: itDepartment.id },
+      data: { headId: deptHeadEmployee.id },
     })
 
     // Create employee profile
@@ -93,12 +152,12 @@ export async function seedDatabase() {
         email: "employee@pyrol.com",
         phone: "+63 912 345 6790",
         position: "Software Developer",
-        salaryRate: 50000,
         salaryType: "MONTHLY",
         hireDate: new Date("2023-06-01"),
         userId: employeeUser.id,
         departmentId: itDepartment.id,
         scheduleId: regularSchedule.id,
+        salaryGradeId: empSalaryGrade.id,
       },
     })
 
@@ -200,11 +259,51 @@ export async function seedDatabase() {
       })
     }
 
+    // Create sample payroll periods and items
+    const currentMonth = new Date()
+    const lastMonth = new Date(currentMonth)
+    lastMonth.setMonth(lastMonth.getMonth() - 1)
+    
+    // Create payroll period for last month
+    const payrollPeriod = await prisma.payrollPeriod.create({
+      data: {
+        name: `${lastMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} Payroll`,
+        startDate: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 1),
+        endDate: new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 0),
+        status: 'CLOSED'
+      }
+    })
+
+    // Create payroll items for each employee
+    for (const employee of employees) {
+      const basicPay = employee.salaryGrade?.salaryRate || 25000 // Default salary
+      const sssDeduction = basicPay * 0.045 // 4.5%
+      const philhealthDeduction = basicPay * 0.0275 // 2.75%
+      const pagibigDeduction = basicPay * 0.02 // 2%
+      const totalDeductions = sssDeduction + philhealthDeduction + pagibigDeduction
+      const netPay = basicPay - totalDeductions
+
+      await prisma.payrollItem.create({
+        data: {
+          employeeId: employee.id,
+          payrollPeriodId: payrollPeriod.id,
+          basicPay: basicPay,
+          overtimePay: 0,
+          holidayPay: 0,
+          totalEarnings: basicPay,
+          totalDeductions: totalDeductions,
+          netPay: netPay
+        }
+      })
+    }
+
     console.log("Database seeded successfully!")
     console.log("Demo accounts created:")
     console.log("Admin: admin@pyrol.com / admin123")
+    console.log("Department Head: depthead@pyrol.com / dept123")
     console.log("Employee: employee@pyrol.com / emp123")
     console.log("Sample attendance records created for testing")
+    console.log("Sample payroll data created for testing")
 
   } catch (error) {
     console.error("Error seeding database:", error)

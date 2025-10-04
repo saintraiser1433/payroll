@@ -58,8 +58,8 @@ export async function GET(request: NextRequest) {
       where.status = status
     }
 
-    // If user is an employee, only show their own attendance
-    if (session.user.role === 'EMPLOYEE') {
+    // If user is an employee or department head, only show their own attendance
+    if (session.user.role === 'EMPLOYEE' || session.user.role === 'DEPARTMENT_HEAD') {
       const employee = await prisma.employee.findFirst({
         where: { userId: session.user.id }
       })
@@ -91,7 +91,6 @@ export async function GET(request: NextRequest) {
       }),
       prisma.attendance.count({ where })
     ])
-
 
     return NextResponse.json({
       attendances,
@@ -129,8 +128,16 @@ export async function POST(request: NextRequest) {
         const { employeeId, type } = timeInOutSchema.parse(body)
         console.log('Schema validation passed:', { employeeId, type })
       
-      // Verify employee access
+      // Verify employee access - only employees can clock themselves in/out
       if (session.user.role === 'EMPLOYEE') {
+        const employee = await prisma.employee.findFirst({
+          where: { userId: session.user.id }
+        })
+        if (!employee || employee.id !== employeeId) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+      } else if (session.user.role === 'DEPARTMENT_HEAD') {
+        // Department heads can only clock themselves in/out, not others
         const employee = await prisma.employee.findFirst({
           where: { userId: session.user.id }
         })

@@ -34,7 +34,7 @@ export function generatePayslipPDF(data: PayslipData): jsPDF {
   // Company Header
   doc.setFontSize(20)
   doc.setFont('helvetica', 'bold')
-  doc.text('PYROL COMPANY', 105, 20, { align: 'center' })
+  doc.text('DBE BEACH RESORT', 105, 20, { align: 'center' })
   
   doc.setFontSize(12)
   doc.setFont('helvetica', 'normal')

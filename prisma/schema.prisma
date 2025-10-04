@@ -119,6 +119,7 @@ model PayrollPeriod {
   startDate    DateTime
   endDate      DateTime
   status       PayrollStatus @default(DRAFT)
+  deductionsEnabled Boolean   @default(true)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   payrollItems PayrollItem[]
@@ -220,6 +221,7 @@ model EmployeeBenefit {
 
 enum Role {
   ADMIN
+  DEPARTMENT_HEAD
   EMPLOYEE
 }
 

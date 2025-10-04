@@ -23,16 +23,43 @@ export default withAuth(
       const userRole = token.role
 
       // Admin-only routes
-      const adminRoutes = ["/employees", "/schedules", "/payroll"]
+      const adminRoutes = ["/employees", "/schedules", "/payroll", "/departments", "/benefits", "/holidays", "/salary-grades"]
       const isAdminRoute = adminRoutes.some(route => pathname.startsWith(route))
 
       if (isAdminRoute && userRole !== "ADMIN") {
-        return NextResponse.redirect(new URL("/employee-dashboard", req.url))
+        // Redirect to appropriate dashboard based on role
+        if (userRole === "DEPARTMENT_HEAD") {
+          return NextResponse.redirect(new URL("/department-head-dashboard", req.url))
+        } else {
+          return NextResponse.redirect(new URL("/employee-dashboard", req.url))
+        }
+      }
+
+      // Department head-only routes
+      if (pathname.startsWith("/department-head-dashboard") && userRole !== "DEPARTMENT_HEAD") {
+        if (userRole === "ADMIN") {
+          return NextResponse.redirect(new URL("/", req.url))
+        } else {
+          return NextResponse.redirect(new URL("/employee-dashboard", req.url))
+        }
       }
 
       // Employee-only routes
       if (pathname.startsWith("/employee-dashboard") && userRole !== "EMPLOYEE") {
-        return NextResponse.redirect(new URL("/", req.url))
+        if (userRole === "ADMIN") {
+          return NextResponse.redirect(new URL("/", req.url))
+        } else {
+          return NextResponse.redirect(new URL("/department-head-dashboard", req.url))
+        }
+      }
+
+      // Redirect to appropriate dashboard based on role
+      if (pathname === "/" && userRole !== "ADMIN") {
+        if (userRole === "DEPARTMENT_HEAD") {
+          return NextResponse.redirect(new URL("/department-head-dashboard", req.url))
+        } else {
+          return NextResponse.redirect(new URL("/employee-dashboard", req.url))
+        }
       }
     }
 
@@ -60,9 +87,9 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public folder
+     * - static files (images, etc.)
      */
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|public).*)",
+    "/((?!api/auth|_next/static|_next/image|favicon.ico|logo.png|trop.jpg|placeholder).*)",
   ],
 }
 

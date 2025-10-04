@@ -140,7 +140,7 @@ export async function PUT(request: NextRequest) {
     if (headId) {
       const employee = await prisma.employee.findUnique({
         where: { id: headId },
-        include: { department: true }
+        include: { department: true, managedDepartment: true }
       })
 
       if (!employee) {
@@ -156,32 +156,51 @@ export async function PUT(request: NextRequest) {
           { status: 400 }
         )
       }
+
+      // Check if employee is already a head of another department
+      if (employee.managedDepartment && employee.managedDepartment.id !== departmentId) {
+        return NextResponse.json(
+          { error: 'Employee is already a head of another department' },
+          { status: 400 }
+        )
+      }
     }
 
-    // Update department head
-    const updatedDepartment = await prisma.department.update({
-      where: { id: departmentId },
-      data: { headId: headId || null },
-      include: {
-        employees: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            position: true,
-            isActive: true
-          }
-        },
-        head: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            position: true,
-            employeeId: true
+    // Use transaction to handle department head assignment
+    const updatedDepartment = await prisma.$transaction(async (tx) => {
+      // If assigning a new head, first remove them from any other department they might be heading
+      if (headId) {
+        await tx.department.updateMany({
+          where: { headId: headId },
+          data: { headId: null }
+        })
+      }
+
+      // Update the target department
+      return await tx.department.update({
+        where: { id: departmentId },
+        data: { headId: headId || null },
+        include: {
+          employees: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              position: true,
+              isActive: true
+            }
+          },
+          head: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              position: true,
+              employeeId: true
+            }
           }
         }
-      }
+      })
     })
 
     return NextResponse.json(updatedDepartment)

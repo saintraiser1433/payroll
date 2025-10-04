@@ -132,6 +132,7 @@ export default function AttendancePage() {
   })
 
   const isEmployee = session?.user?.role === 'EMPLOYEE'
+  const isDepartmentHead = session?.user?.role === 'DEPARTMENT_HEAD'
   const isAdmin = session?.user?.role === 'ADMIN'
 
   useEffect(() => {
@@ -472,7 +473,8 @@ export default function AttendancePage() {
         setClockInEmployee(employeeId)
       }
       
-      if (isEmployee) {
+      // For non-admin users, get their own employee ID
+      if (!isAdmin) {
         const employeeResponse = await fetch('/api/employees?limit=100&isActive=true')
         if (!employeeResponse.ok) throw new Error('Failed to get employee info')
         const employeeData = await employeeResponse.json()
@@ -481,12 +483,13 @@ export default function AttendancePage() {
         )
         if (!currentEmployee) throw new Error('Employee record not found')
         employeeId = currentEmployee.id
+        console.log('Using personal employee ID:', employeeId)
       }
 
       if (!employeeId) {
         toast({
           title: "Error",
-          description: "Please select an employee",
+          description: isAdmin ? "Please select an employee" : "Employee record not found",
           variant: "destructive",
         })
         return
@@ -639,20 +642,20 @@ export default function AttendancePage() {
       )
       console.log('Employee record found:', record ? 'exists' : 'null')
       return record
-    } else {
-      // For admins, if clockInEmployee is selected, find that employee's record
-      if (clockInEmployee) {
-        const record = attendanceRecords.find(record => 
-          record.date.split('T')[0] === today && 
-          record.employee.id === clockInEmployee
-        )
-        console.log('Admin record found for selected employee:', record ? 'exists' : 'null')
-        return record
-      }
-      
-      console.log('No employee selected and no dedicated record')
-      return null
     }
+    
+    // For admins, if clockInEmployee is selected, find that employee's record
+    if (clockInEmployee) {
+      const record = attendanceRecords.find(record => 
+        record.date.split('T')[0] === today && 
+        record.employee.id === clockInEmployee
+      )
+      console.log('Admin record found for selected employee:', record ? 'exists' : 'null')
+      return record
+    }
+    
+    console.log('No employee selected and no dedicated record')
+    return null
   }
 
   // Fetch today's attendance record specifically for clock in/out
@@ -679,8 +682,6 @@ export default function AttendancePage() {
     }
   }
 
-  const todayRecord = getTodayAttendance()
-
   if (loading) {
     return (
       <DashboardLayout>
@@ -702,12 +703,18 @@ export default function AttendancePage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Attendance</h1>
+            <h1 className="text-3xl font-bold tracking-tight">
+              {isAdmin ? 'Attendance Management' : 'My Attendance'}
+            </h1>
             <p className="text-muted-foreground">
-              Track employee attendance and working hours
+              {isAdmin 
+                ? 'Track employee attendance and working hours' 
+                : 'View your personal attendance records'
+              }
             </p>
           </div>
           <div className="flex items-center space-x-4">
+             {isAdmin && (
              <Button 
                onClick={() => {
                  console.log('Manual stats calculation triggered')
@@ -719,6 +726,7 @@ export default function AttendancePage() {
              >
                Recalculate Stats
              </Button>
+             )}
             <div className="text-right">
               <div className="text-2xl font-bold">
                 {currentTime.toLocaleTimeString('en-US', {
@@ -739,7 +747,8 @@ export default function AttendancePage() {
           </div>
         </div>
 
-        {/* Clock In/Out Section */}
+        {/* Clock In/Out Section - Admin Only */}
+        {isAdmin && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card className="lg:col-span-2">
             <CardHeader>
@@ -752,10 +761,9 @@ export default function AttendancePage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {isAdmin && (
-                <div>
-                  <Label htmlFor="employee-select">Select Employee for Clock In/Out</Label>
-                  <Select 
+              <div>
+                <Label htmlFor="employee-select">Select Employee for Clock In/Out</Label>
+                <Select 
                     value={clockInEmployee} 
                     onValueChange={(value) => {
                       console.log('Employee selected:', value)
@@ -789,7 +797,6 @@ export default function AttendancePage() {
                     </SelectContent>
                   </Select>
                 </div>
-              )}
 
               {isAdmin && (clockInEmployee || todayAttendanceRecord) && (
                 <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
@@ -820,13 +827,14 @@ export default function AttendancePage() {
                   onClick={() => handleClockInOut('IN')}
                   disabled={
                     clockLoading || 
-                    (isAdmin && !clockInEmployee)
+                    (isAdmin && !clockInEmployee) ||
+                    (!isAdmin && !isEmployee && !isDepartmentHead)
                   }
                   className="col-span-1"
-                  variant={todayRecord?.timeIn ? "outline" : "default"}
+                  variant={getTodayAttendance()?.timeIn ? "outline" : "default"}
                 >
                   <CheckCircle className="mr-2 h-4 w-4" />
-                  {todayRecord?.timeIn ? "Clocked In" : "Clock In"}
+                  {getTodayAttendance()?.timeIn ? "Clocked In" : "Clock In"}
                 </Button>
 
                 {/* Break Out Button */}
@@ -834,13 +842,14 @@ export default function AttendancePage() {
                   onClick={() => handleClockInOut('BREAK_OUT')}
                   disabled={
                     clockLoading || 
-                    (isAdmin && !clockInEmployee)
+                    (isAdmin && !clockInEmployee) ||
+                    (!isAdmin && !isEmployee && !isDepartmentHead)
                   }
                   className="col-span-1"
-                  variant={todayRecord?.breakOut ? "outline" : "secondary"}
+                  variant={getTodayAttendance()?.breakOut ? "outline" : "secondary"}
                 >
                   <Coffee className="mr-2 h-4 w-4" />
-                  {todayRecord?.breakOut ? "On Break" : "Break Out"}
+                  {getTodayAttendance()?.breakOut ? "On Break" : "Break Out"}
                 </Button>
 
                 {/* Break In Button */}
@@ -848,13 +857,14 @@ export default function AttendancePage() {
                   onClick={() => handleClockInOut('BREAK_IN')}
                   disabled={
                     clockLoading || 
-                    (isAdmin && !clockInEmployee)
+                    (isAdmin && !clockInEmployee) ||
+                    (!isAdmin && !isEmployee && !isDepartmentHead)
                   }
                   className="col-span-1"
-                  variant={todayRecord?.breakIn ? "outline" : "secondary"}
+                  variant={getTodayAttendance()?.breakIn ? "outline" : "secondary"}
                 >
                   <ArrowRight className="mr-2 h-4 w-4" />
-                  {todayRecord?.breakIn ? "Back" : "Break In"}
+                  {getTodayAttendance()?.breakIn ? "Back" : "Break In"}
                 </Button>
 
                 {/* Clock Out Button */}
@@ -862,52 +872,57 @@ export default function AttendancePage() {
                   onClick={() => handleClockInOut('OUT')}
                   disabled={
                     clockLoading || 
-                    (isAdmin && !clockInEmployee)
+                    (isAdmin && !clockInEmployee) ||
+                    (!isAdmin && !isEmployee && !isDepartmentHead)
                   }
                   className="col-span-1"
-                  variant={todayRecord?.timeOut ? "outline" : "default"}
+                  variant={getTodayAttendance()?.timeOut ? "outline" : "default"}
                 >
                   <XCircle className="mr-2 h-4 w-4" />
-                  {todayRecord?.timeOut ? "Clocked Out" : "Clock Out"}
+                  {getTodayAttendance()?.timeOut ? "Clocked Out" : "Clock Out"}
                 </Button>
               </div>
 
-              {todayRecord && (
+              {getTodayAttendance() && (
                 <div className="p-4 bg-muted rounded-lg">
                   <h4 className="font-medium mb-2">Today's Status</h4>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-muted-foreground">Time In:</span>
-                      <div className="font-medium">{formatTime(todayRecord.timeIn)}</div>
+                      <div className="font-medium">{formatTime(getTodayAttendance()?.timeIn)}</div>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Time Out:</span>
-                      <div className="font-medium">{formatTime(todayRecord.timeOut)}</div>
+                      <div className="font-medium">{formatTime(getTodayAttendance()?.timeOut)}</div>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Break Out:</span>
-                      <div className="font-medium">{formatTime(todayRecord.breakOut)}</div>
+                      <div className="font-medium">{formatTime(getTodayAttendance()?.breakOut)}</div>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Break In:</span>
-                      <div className="font-medium">{formatTime(todayRecord.breakIn)}</div>
+                      <div className="font-medium">{formatTime(getTodayAttendance()?.breakIn)}</div>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Status:</span>
-                      <div>{getStatusBadge(todayRecord.status)}</div>
+                      <div>{getStatusBadge(getTodayAttendance()?.status)}</div>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Late:</span>
-                      <div className="font-medium">{formatDuration(todayRecord.lateMinutes)}</div>
+                      <div className="font-medium">{formatDuration(getTodayAttendance()?.lateMinutes)}</div>
                     </div>
                   </div>
                 </div>
               )}
             </CardContent>
           </Card>
+        </div>
+        )}
 
-          {/* Quick Stats */}
-          <Card>
+        {/* Quick Stats - Admin Only */}
+          {isAdmin && (
+            <>
+            <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Users className="h-4 w-4" />
@@ -998,9 +1013,11 @@ export default function AttendancePage() {
               </div>
             </CardContent>
           </Card>
-        </div>
+            </>
+          )}
 
-        {/* Filters */}
+        {/* Filters - Admin Only */}
+        {isAdmin && (
         <div className="flex items-center space-x-4">
           {/* Filter Status */}
           {(startDateFilter || endDateFilter || searchTerm || selectedEmployee || statusFilter) && (
@@ -1116,6 +1133,7 @@ export default function AttendancePage() {
             </SelectContent>
           </Select>
         </div>
+        )}
 
         {/* Attendance Records Table */}
         <Card>

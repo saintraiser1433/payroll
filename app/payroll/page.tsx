@@ -18,6 +18,12 @@ import {
   Clock,
   AlertTriangle,
   RefreshCw,
+  ChevronDown,
+  X,
+  ChevronUp,
+  ChevronDown as ChevronDownIcon,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -64,6 +70,7 @@ interface PayrollPeriod {
   startDate: string
   endDate: string
   status: 'DRAFT' | 'CLOSED'
+  deductionsEnabled: boolean
   createdAt: string
   totalEarnings: number
   totalDeductions: number
@@ -130,6 +137,41 @@ export default function PayrollPage() {
   const [selectedPeriod, setSelectedPeriod] = useState<string>("")
   const [searchTerm, setSearchTerm] = useState("")
   const [isCreatePeriodOpen, setIsCreatePeriodOpen] = useState(false)
+  
+  // Enhanced filtering state for payroll items
+  const [filters, setFilters] = useState({
+    status: "all",
+    department: "all",
+    position: "all",
+    dateRange: {
+      start: "",
+      end: ""
+    },
+    minAmount: "",
+    maxAmount: ""
+  })
+  const [showFilters, setShowFilters] = useState(false)
+  const [departments, setDepartments] = useState<Array<{id: string, name: string}>>([])
+  const [positions, setPositions] = useState<Array<string>>([])
+  
+  // Filtering state for payroll periods
+  const [periodsFilters, setPeriodsFilters] = useState({
+    status: "all",
+    dateRange: {
+      start: "",
+      end: ""
+    },
+    minAmount: "",
+    maxAmount: "",
+    minEmployees: "",
+    maxEmployees: ""
+  })
+  const [periodsSearchTerm, setPeriodsSearchTerm] = useState("")
+  const [showPeriodsFilters, setShowPeriodsFilters] = useState(false)
+  
+  // Sorting state for periods
+  const [periodsSortField, setPeriodsSortField] = useState<string>("")
+  const [periodsSortDirection, setPeriodsSortDirection] = useState<"asc" | "desc">("desc")
   const [periodsPagination, setPeriodsPagination] = useState<PaginationData>({
     page: 1,
     limit: 10,
@@ -169,13 +211,21 @@ export default function PayrollPage() {
     if (isEmployee) {
       fetchPayrollItems()
     }
-  }, [periodsPagination.page, periodsPagination.limit])
+  }, [periodsPagination.page, periodsPagination.limit, periodsSearchTerm, periodsFilters, periodsSortField, periodsSortDirection])
+
+  // Separate useEffect for fetching departments and positions
+  useEffect(() => {
+    if (isAdmin) {
+      fetchDepartments()
+      fetchPositions()
+    }
+  }, [isAdmin])
 
   useEffect(() => {
     if (selectedPeriod && isAdmin) {
       fetchPayrollItems(selectedPeriod === 'all' ? undefined : selectedPeriod)
     }
-  }, [selectedPeriod, itemsPagination.page, itemsPagination.limit, searchTerm])
+  }, [selectedPeriod, itemsPagination.page, itemsPagination.limit, searchTerm, filters])
 
   const fetchPayrollPeriods = async () => {
     try {
@@ -183,20 +233,66 @@ export default function PayrollPage() {
       params.append('page', periodsPagination.page.toString())
       params.append('limit', periodsPagination.limit.toString())
       
+      // Add search parameter
+      if (periodsSearchTerm) params.append('search', periodsSearchTerm)
+      
+      // Add filter parameters
+      if (periodsFilters.status !== 'all') params.append('status', periodsFilters.status)
+      if (periodsFilters.dateRange.start) params.append('startDate', periodsFilters.dateRange.start)
+      if (periodsFilters.dateRange.end) params.append('endDate', periodsFilters.dateRange.end)
+      if (periodsFilters.minAmount) params.append('minAmount', periodsFilters.minAmount)
+      if (periodsFilters.maxAmount) params.append('maxAmount', periodsFilters.maxAmount)
+      if (periodsFilters.minEmployees) params.append('minEmployees', periodsFilters.minEmployees)
+      if (periodsFilters.maxEmployees) params.append('maxEmployees', periodsFilters.maxEmployees)
+      
+      // Add sorting parameters
+      if (periodsSortField) params.append('sortField', periodsSortField)
+      if (periodsSortDirection) params.append('sortDirection', periodsSortDirection)
+      
       const response = await fetch(`/api/payroll/periods?${params}`)
-      if (!response.ok) throw new Error('Failed to fetch payroll periods')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        console.error('Payroll periods fetch error:', errorData)
+        throw new Error(errorData.error || 'Failed to fetch payroll periods')
+      }
       
       const data = await response.json()
       setPayrollPeriods(data.periods || [])
       setPeriodsPagination(data.pagination || periodsPagination)
     } catch (error) {
+      console.error('Error fetching payroll periods:', error)
       toast({
         title: "Error",
-        description: "Failed to fetch payroll periods",
+        description: error instanceof Error ? error.message : "Failed to fetch payroll periods",
         variant: "destructive",
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchDepartments = async () => {
+    try {
+      const response = await fetch('/api/departments')
+      if (!response.ok) throw new Error('Failed to fetch departments')
+      
+      const data = await response.json()
+      setDepartments(data || [])
+    } catch (error) {
+      console.error('Error fetching departments:', error)
+    }
+  }
+
+  const fetchPositions = async () => {
+    try {
+      const response = await fetch('/api/employees')
+      if (!response.ok) throw new Error('Failed to fetch employees')
+      
+      const data = await response.json()
+      const uniquePositions = [...new Set(data.employees.map((emp: any) => emp.position).filter(Boolean))] as string[]
+      setPositions(uniquePositions.sort())
+    } catch (error) {
+      console.error('Error fetching positions:', error)
     }
   }
 
@@ -205,6 +301,16 @@ export default function PayrollPage() {
       const params = new URLSearchParams()
       if (payrollPeriodId && payrollPeriodId !== 'all') params.append('payrollPeriodId', payrollPeriodId)
       if (searchTerm) params.append('search', searchTerm)
+      
+      // Add filter parameters
+      if (filters.status !== 'all') params.append('status', filters.status)
+      if (filters.department !== 'all') params.append('department', filters.department)
+      if (filters.position !== 'all') params.append('position', filters.position)
+      if (filters.dateRange.start) params.append('startDate', filters.dateRange.start)
+      if (filters.dateRange.end) params.append('endDate', filters.dateRange.end)
+      if (filters.minAmount) params.append('minAmount', filters.minAmount)
+      if (filters.maxAmount) params.append('maxAmount', filters.maxAmount)
+      
       params.append('page', itemsPagination.page.toString())
       params.append('limit', itemsPagination.limit.toString())
       
@@ -281,6 +387,41 @@ export default function PayrollPage() {
       description: `Are you sure you want to close "${periodName}"? Once closed, this payroll period cannot be reopened.`,
       action: () => performCloseEntry(periodId),
     })
+  }
+
+  const handleToggleDeductions = async (periodId: string, currentStatus: boolean) => {
+    try {
+      const response = await fetch('/api/payroll/periods/toggle-deductions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payrollPeriodId: periodId,
+          deductionsEnabled: !currentStatus
+        })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to toggle deductions')
+      }
+
+      const data = await response.json()
+      
+      toast({
+        title: "Success",
+        description: data.message,
+      })
+
+      // Refresh the payroll periods data
+      fetchPayrollPeriods()
+    } catch (error) {
+      console.error('Error toggling deductions:', error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to toggle deductions",
+        variant: "destructive",
+      })
+    }
   }
 
   const performCalculatePayroll = async (periodId: string) => {
@@ -457,6 +598,76 @@ export default function PayrollPage() {
     }
   }
 
+  const clearFilters = () => {
+    setFilters({
+      status: "all",
+      department: "all",
+      position: "all",
+      dateRange: {
+        start: "",
+        end: ""
+      },
+      minAmount: "",
+      maxAmount: ""
+    })
+    setSearchTerm("")
+  }
+
+  const clearPeriodsFilters = () => {
+    setPeriodsFilters({
+      status: "all",
+      dateRange: {
+        start: "",
+        end: ""
+      },
+      minAmount: "",
+      maxAmount: "",
+      minEmployees: "",
+      maxEmployees: ""
+    })
+    setPeriodsSearchTerm("")
+  }
+
+  const hasActiveFilters = () => {
+    return filters.status !== "all" || 
+           filters.department !== "all" || 
+           filters.position !== "all" ||
+           filters.dateRange.start || 
+           filters.dateRange.end || 
+           filters.minAmount || 
+           filters.maxAmount ||
+           searchTerm
+  }
+
+  const hasActivePeriodsFilters = () => {
+    return periodsFilters.status !== "all" || 
+           periodsFilters.dateRange.start || 
+           periodsFilters.dateRange.end || 
+           periodsFilters.minAmount || 
+           periodsFilters.maxAmount ||
+           periodsFilters.minEmployees ||
+           periodsFilters.maxEmployees ||
+           periodsSearchTerm
+  }
+
+  const handlePeriodsSort = (field: string) => {
+    if (periodsSortField === field) {
+      setPeriodsSortDirection(periodsSortDirection === "asc" ? "desc" : "asc")
+    } else {
+      setPeriodsSortField(field)
+      setPeriodsSortDirection("asc")
+    }
+  }
+
+  const getPeriodsSortIcon = (field: string) => {
+    if (periodsSortField !== field) {
+      return <ChevronDownIcon className="h-4 w-4 opacity-50" />
+    }
+    return periodsSortDirection === "asc" ? 
+      <ChevronUp className="h-4 w-4" /> : 
+      <ChevronDownIcon className="h-4 w-4" />
+  }
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-PH', {
       style: 'currency',
@@ -582,6 +793,176 @@ export default function PayrollPage() {
           {/* Payroll Periods Tab */}
           {isAdmin && (
             <TabsContent value="periods" className="space-y-6">
+              {/* Search and Filter Section for Periods */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">Search & Filters</CardTitle>
+                    <div className="flex items-center gap-2">
+                      {hasActivePeriodsFilters() && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={clearPeriodsFilters}
+                          className="text-muted-foreground"
+                        >
+                          <X className="h-4 w-4 mr-1" />
+                          Clear All
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowPeriodsFilters(!showPeriodsFilters)}
+                      >
+                        <Filter className="h-4 w-4 mr-1" />
+                        Filters
+                        <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${showPeriodsFilters ? 'rotate-180' : ''}`} />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Search Bar */}
+                  <div className="flex items-center space-x-4">
+                    <div className="relative flex-1 max-w-sm">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        placeholder="Search periods by name..."
+                        value={periodsSearchTerm}
+                        onChange={(e) => setPeriodsSearchTerm(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Advanced Filters */}
+                  {showPeriodsFilters && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 border-t">
+                      {/* Status Filter */}
+                      <div>
+                        <Label htmlFor="periods-status-filter" className="text-sm font-medium">Status</Label>
+                        <Select value={periodsFilters.status} onValueChange={(value) => setPeriodsFilters(prev => ({ ...prev, status: value }))}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="All Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Status</SelectItem>
+                            <SelectItem value="DRAFT">Draft</SelectItem>
+                            <SelectItem value="CLOSED">Closed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Date Range Filter */}
+                      <div>
+                        <Label htmlFor="periods-start-date" className="text-sm font-medium">Start Date</Label>
+                        <Input
+                          id="periods-start-date"
+                          type="date"
+                          value={periodsFilters.dateRange.start}
+                          onChange={(e) => setPeriodsFilters(prev => ({ 
+                            ...prev, 
+                            dateRange: { ...prev.dateRange, start: e.target.value }
+                          }))}
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="periods-end-date" className="text-sm font-medium">End Date</Label>
+                        <Input
+                          id="periods-end-date"
+                          type="date"
+                          value={periodsFilters.dateRange.end}
+                          onChange={(e) => setPeriodsFilters(prev => ({ 
+                            ...prev, 
+                            dateRange: { ...prev.dateRange, end: e.target.value }
+                          }))}
+                        />
+                      </div>
+
+                      {/* Amount Range Filters */}
+                      <div>
+                        <Label htmlFor="periods-min-amount" className="text-sm font-medium">Min Net Pay</Label>
+                        <Input
+                          id="periods-min-amount"
+                          type="number"
+                          placeholder="0.00"
+                          value={periodsFilters.minAmount}
+                          onChange={(e) => setPeriodsFilters(prev => ({ ...prev, minAmount: e.target.value }))}
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="periods-max-amount" className="text-sm font-medium">Max Net Pay</Label>
+                        <Input
+                          id="periods-max-amount"
+                          type="number"
+                          placeholder="0.00"
+                          value={periodsFilters.maxAmount}
+                          onChange={(e) => setPeriodsFilters(prev => ({ ...prev, maxAmount: e.target.value }))}
+                        />
+                      </div>
+
+                      {/* Employee Count Range Filters */}
+                      <div>
+                        <Label htmlFor="periods-min-employees" className="text-sm font-medium">Min Employees</Label>
+                        <Input
+                          id="periods-min-employees"
+                          type="number"
+                          placeholder="0"
+                          value={periodsFilters.minEmployees}
+                          onChange={(e) => setPeriodsFilters(prev => ({ ...prev, minEmployees: e.target.value }))}
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="periods-max-employees" className="text-sm font-medium">Max Employees</Label>
+                        <Input
+                          id="periods-max-employees"
+                          type="number"
+                          placeholder="0"
+                          value={periodsFilters.maxEmployees}
+                          onChange={(e) => setPeriodsFilters(prev => ({ ...prev, maxEmployees: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Active Filters Display */}
+                  {hasActivePeriodsFilters() && (
+                    <div className="flex flex-wrap gap-2 pt-2 border-t">
+                      <span className="text-sm text-muted-foreground">Active filters:</span>
+                      {periodsSearchTerm && (
+                        <Badge variant="secondary" className="text-xs">
+                          Search: "{periodsSearchTerm}"
+                        </Badge>
+                      )}
+                      {periodsFilters.status !== "all" && (
+                        <Badge variant="secondary" className="text-xs">
+                          Status: {periodsFilters.status}
+                        </Badge>
+                      )}
+                      {(periodsFilters.dateRange.start || periodsFilters.dateRange.end) && (
+                        <Badge variant="secondary" className="text-xs">
+                          Date: {periodsFilters.dateRange.start || 'Start'} - {periodsFilters.dateRange.end || 'End'}
+                        </Badge>
+                      )}
+                      {(periodsFilters.minAmount || periodsFilters.maxAmount) && (
+                        <Badge variant="secondary" className="text-xs">
+                          Net Pay: {periodsFilters.minAmount || '0'} - {periodsFilters.maxAmount || '∞'}
+                        </Badge>
+                      )}
+                      {(periodsFilters.minEmployees || periodsFilters.maxEmployees) && (
+                        <Badge variant="secondary" className="text-xs">
+                          Employees: {periodsFilters.minEmployees || '0'} - {periodsFilters.maxEmployees || '∞'}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <Card>
                   <CardHeader className="pb-2">
@@ -643,13 +1024,70 @@ export default function PayrollPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Period</TableHead>
-                        <TableHead>Date Range</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Employees</TableHead>
-                        <TableHead>Total Earnings</TableHead>
-                        <TableHead>Total Deductions</TableHead>
-                        <TableHead>Net Pay</TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handlePeriodsSort("name")}
+                        >
+                          <div className="flex items-center gap-2">
+                            Period
+                            {getPeriodsSortIcon("name")}
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handlePeriodsSort("startDate")}
+                        >
+                          <div className="flex items-center gap-2">
+                            Date Range
+                            {getPeriodsSortIcon("startDate")}
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handlePeriodsSort("status")}
+                        >
+                          <div className="flex items-center gap-2">
+                            Status
+                            {getPeriodsSortIcon("status")}
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handlePeriodsSort("employeeCount")}
+                        >
+                          <div className="flex items-center gap-2">
+                            Employees
+                            {getPeriodsSortIcon("employeeCount")}
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handlePeriodsSort("totalEarnings")}
+                        >
+                          <div className="flex items-center gap-2">
+                            Total Earnings
+                            {getPeriodsSortIcon("totalEarnings")}
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handlePeriodsSort("totalDeductions")}
+                        >
+                          <div className="flex items-center gap-2">
+                            Total Deductions
+                            {getPeriodsSortIcon("totalDeductions")}
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handlePeriodsSort("totalNetPay")}
+                        >
+                          <div className="flex items-center gap-2">
+                            Net Pay
+                            {getPeriodsSortIcon("totalNetPay")}
+                          </div>
+                        </TableHead>
+                        <TableHead>Deductions</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -674,6 +1112,21 @@ export default function PayrollPage() {
                           <TableCell>{formatCurrency(period.totalDeductions)}</TableCell>
                           <TableCell className="font-medium">
                             {formatCurrency(period.totalNetPay)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center space-x-2">
+                              {period.deductionsEnabled ? (
+                                <>
+                                  <ToggleRight className="h-4 w-4 text-green-600" />
+                                  <span className="text-green-600 text-sm font-medium">Enabled</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ToggleLeft className="h-4 w-4 text-gray-400" />
+                                  <span className="text-gray-500 text-sm">Disabled</span>
+                                </>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <DropdownMenu>
@@ -722,6 +1175,21 @@ export default function PayrollPage() {
                                     )}
                                   </>
                                 )}
+                                <DropdownMenuItem 
+                                  onClick={() => handleToggleDeductions(period.id, period.deductionsEnabled)}
+                                >
+                                  {period.deductionsEnabled ? (
+                                    <>
+                                      <ToggleRight className="mr-2 h-4 w-4 text-green-600" />
+                                      Disable Deductions
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ToggleLeft className="mr-2 h-4 w-4 text-gray-400" />
+                                      Enable Deductions
+                                    </>
+                                  )}
+                                </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem 
                                   onClick={() => handleExportReport(period.id)}
@@ -761,33 +1229,213 @@ export default function PayrollPage() {
 
           {/* Payroll Items Tab */}
           <TabsContent value="items" className="space-y-6">
-            <div className="flex items-center space-x-4">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                <Input
-                  placeholder="Search employees..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              
-              {isAdmin && (
-                <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-                  <SelectTrigger className="w-64">
-                    <SelectValue placeholder="Select payroll period" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Periods</SelectItem>
-                    {payrollPeriods.map((period) => (
-                      <SelectItem key={period.id} value={period.id}>
-                        {period.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
+            {/* Enhanced Search and Filter Section */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">Search & Filters</CardTitle>
+                  <div className="flex items-center gap-2">
+                    {hasActiveFilters() && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={clearFilters}
+                        className="text-muted-foreground"
+                      >
+                        <X className="h-4 w-4 mr-1" />
+                        Clear All
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowFilters(!showFilters)}
+                    >
+                      <Filter className="h-4 w-4 mr-1" />
+                      Filters
+                      <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Search Bar */}
+                <div className="flex items-center space-x-4">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                    <Input
+                      placeholder="Search employees, ID, or position..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  
+                  {isAdmin && (
+                    <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                      <SelectTrigger className="w-64">
+                        <SelectValue placeholder="Select payroll period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Periods</SelectItem>
+                        {payrollPeriods.map((period) => (
+                          <SelectItem key={period.id} value={period.id}>
+                            {period.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                {/* Advanced Filters */}
+                {showFilters && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t">
+                    {/* Status Filter */}
+                    <div>
+                      <Label htmlFor="status-filter" className="text-sm font-medium">Status</Label>
+                      <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="All Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Status</SelectItem>
+                          <SelectItem value="DRAFT">Draft</SelectItem>
+                          <SelectItem value="CLOSED">Closed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Department Filter */}
+                    {isAdmin && (
+                      <div>
+                        <Label htmlFor="department-filter" className="text-sm font-medium">Department</Label>
+                        <Select value={filters.department} onValueChange={(value) => setFilters(prev => ({ ...prev, department: value }))}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="All Departments" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Departments</SelectItem>
+                            {departments.map((dept) => (
+                              <SelectItem key={dept.id} value={dept.id}>
+                                {dept.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {/* Position Filter */}
+                    {isAdmin && (
+                      <div>
+                        <Label htmlFor="position-filter" className="text-sm font-medium">Position</Label>
+                        <Select value={filters.position} onValueChange={(value) => setFilters(prev => ({ ...prev, position: value }))}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="All Positions" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Positions</SelectItem>
+                            {positions.map((position) => (
+                              <SelectItem key={position} value={position}>
+                                {position}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {/* Date Range Filter */}
+                    <div>
+                      <Label htmlFor="start-date" className="text-sm font-medium">Start Date</Label>
+                      <Input
+                        id="start-date"
+                        type="date"
+                        value={filters.dateRange.start}
+                        onChange={(e) => setFilters(prev => ({ 
+                          ...prev, 
+                          dateRange: { ...prev.dateRange, start: e.target.value }
+                        }))}
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="end-date" className="text-sm font-medium">End Date</Label>
+                      <Input
+                        id="end-date"
+                        type="date"
+                        value={filters.dateRange.end}
+                        onChange={(e) => setFilters(prev => ({ 
+                          ...prev, 
+                          dateRange: { ...prev.dateRange, end: e.target.value }
+                        }))}
+                      />
+                    </div>
+
+                    {/* Amount Range Filters */}
+                    <div>
+                      <Label htmlFor="min-amount" className="text-sm font-medium">Min Amount</Label>
+                      <Input
+                        id="min-amount"
+                        type="number"
+                        placeholder="0.00"
+                        value={filters.minAmount}
+                        onChange={(e) => setFilters(prev => ({ ...prev, minAmount: e.target.value }))}
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="max-amount" className="text-sm font-medium">Max Amount</Label>
+                      <Input
+                        id="max-amount"
+                        type="number"
+                        placeholder="0.00"
+                        value={filters.maxAmount}
+                        onChange={(e) => setFilters(prev => ({ ...prev, maxAmount: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Filters Display */}
+                {hasActiveFilters() && (
+                  <div className="flex flex-wrap gap-2 pt-2 border-t">
+                    <span className="text-sm text-muted-foreground">Active filters:</span>
+                    {searchTerm && (
+                      <Badge variant="secondary" className="text-xs">
+                        Search: "{searchTerm}"
+                      </Badge>
+                    )}
+                    {filters.status !== "all" && (
+                      <Badge variant="secondary" className="text-xs">
+                        Status: {filters.status}
+                      </Badge>
+                    )}
+                    {filters.department !== "all" && (
+                      <Badge variant="secondary" className="text-xs">
+                        Department: {departments.find(d => d.id === filters.department)?.name || filters.department}
+                      </Badge>
+                    )}
+                    {filters.position !== "all" && (
+                      <Badge variant="secondary" className="text-xs">
+                        Position: {filters.position}
+                      </Badge>
+                    )}
+                    {(filters.dateRange.start || filters.dateRange.end) && (
+                      <Badge variant="secondary" className="text-xs">
+                        Date: {filters.dateRange.start || 'Start'} - {filters.dateRange.end || 'End'}
+                      </Badge>
+                    )}
+                    {(filters.minAmount || filters.maxAmount) && (
+                      <Badge variant="secondary" className="text-xs">
+                        Amount: {filters.minAmount || '0'} - {filters.maxAmount || '∞'}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader>

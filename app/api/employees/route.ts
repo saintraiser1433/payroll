@@ -3,12 +3,14 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
+import bcrypt from 'bcryptjs'
 
 const employeeSchema = z.object({
   employeeId: z.string().min(1, 'Employee ID is required'),
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   email: z.string().email('Valid email is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
   phone: z.string().optional(),
   address: z.string().optional(),
   position: z.string().min(1, 'Position is required'),
@@ -18,6 +20,7 @@ const employeeSchema = z.object({
   hireDate: z.string().transform((str) => new Date(str)),
   departmentId: z.string().optional(),
   scheduleId: z.string().optional(),
+  role: z.enum(['EMPLOYEE', 'DEPARTMENT_HEAD']).default('EMPLOYEE'),
   isActive: z.boolean().default(true),
 })
 
@@ -117,30 +120,64 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if email already exists
-    const existingEmail = await prisma.employee.findUnique({
+    // Check if email already exists in users table
+    const existingUser = await prisma.user.findUnique({
       where: { email: validatedData.email }
     })
 
-    if (existingEmail) {
+    if (existingUser) {
       return NextResponse.json(
         { error: 'Email already exists' },
         { status: 400 }
       )
     }
 
-    const employee = await prisma.employee.create({
-      data: validatedData,
-      include: {
-        department: true,
-        schedule: true,
-        user: {
-          select: { id: true, email: true, role: true }
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(validatedData.password, 12)
+
+    // Create user and employee in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create user first
+      const user = await tx.user.create({
+        data: {
+          email: validatedData.email,
+          password: hashedPassword,
+          role: validatedData.role,
         }
-      }
+      })
+
+      // Create employee with user reference
+      const employee = await tx.employee.create({
+        data: {
+          employeeId: validatedData.employeeId,
+          firstName: validatedData.firstName,
+          lastName: validatedData.lastName,
+          email: validatedData.email,
+          phone: validatedData.phone,
+          address: validatedData.address,
+          position: validatedData.position,
+          jobDescription: validatedData.jobDescription,
+          salaryGradeId: validatedData.salaryGradeId,
+          salaryType: validatedData.salaryType,
+          hireDate: validatedData.hireDate,
+          departmentId: validatedData.departmentId,
+          scheduleId: validatedData.scheduleId,
+          isActive: validatedData.isActive,
+          userId: user.id,
+        },
+        include: {
+          department: true,
+          schedule: true,
+          user: {
+            select: { id: true, email: true, role: true }
+          }
+        }
+      })
+
+      return employee
     })
 
-    return NextResponse.json(employee, { status: 201 })
+    return NextResponse.json(result, { status: 201 })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

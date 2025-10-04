@@ -15,6 +15,13 @@ export async function GET(request: NextRequest) {
     const payrollPeriodId = searchParams.get('payrollPeriodId')
     const employeeId = searchParams.get('employeeId')
     const search = searchParams.get('search')
+    const status = searchParams.get('status')
+    const department = searchParams.get('department')
+    const position = searchParams.get('position')
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
+    const minAmount = searchParams.get('minAmount')
+    const maxAmount = searchParams.get('maxAmount')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '10')
 
@@ -36,7 +43,49 @@ export async function GET(request: NextRequest) {
           { firstName: { contains: search, mode: 'insensitive' } },
           { lastName: { contains: search, mode: 'insensitive' } },
           { employeeId: { contains: search, mode: 'insensitive' } },
+          { position: { contains: search, mode: 'insensitive' } },
         ]
+      }
+    }
+
+    // Status filter
+    if (status && status !== 'all') {
+      where.payrollPeriod = {
+        ...where.payrollPeriod,
+        status: status
+      }
+    }
+
+    // Department filter
+    if (department && department !== 'all') {
+      where.employee = {
+        ...where.employee,
+        departmentId: department
+      }
+    }
+
+    // Position filter
+    if (position && position !== 'all') {
+      where.employee = {
+        ...where.employee,
+        position: position
+      }
+    }
+
+    // Date range filter
+    if (startDate || endDate) {
+      where.payrollPeriod = {
+        ...where.payrollPeriod,
+        ...(startDate && { startDate: { gte: new Date(startDate) } }),
+        ...(endDate && { endDate: { lte: new Date(endDate) } })
+      }
+    }
+
+    // Amount range filter
+    if (minAmount || maxAmount) {
+      where.netPay = {
+        ...(minAmount && { gte: parseFloat(minAmount) }),
+        ...(maxAmount && { lte: parseFloat(maxAmount) })
       }
     }
 
