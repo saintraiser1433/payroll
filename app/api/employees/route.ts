@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
+import QRCode from 'qrcode'
 
 const employeeSchema = z.object({
   employeeId: z.string().min(1, 'Employee ID is required'),
@@ -23,6 +24,28 @@ const employeeSchema = z.object({
   role: z.enum(['EMPLOYEE', 'DEPARTMENT_HEAD']).default('EMPLOYEE'),
   isActive: z.boolean().default(true),
 })
+
+// Helper function to generate QR code
+async function generateQRCode(employeeId: string): Promise<string | null> {
+  try {
+    // Generate QR code with employee ID
+    const qrCodeDataUrl = await QRCode.toDataURL(employeeId, {
+      errorCorrectionLevel: 'M',
+      type: 'image/png',
+      quality: 0.92,
+      margin: 1,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF',
+      },
+      width: 300,
+    })
+    return qrCodeDataUrl
+  } catch (error) {
+    console.error('Error generating QR code:', error)
+    return null
+  }
+}
 
 // GET /api/employees - Get all employees
 export async function GET(request: NextRequest) {
@@ -79,8 +102,27 @@ export async function GET(request: NextRequest) {
       prisma.employee.count({ where })
     ])
 
+    // Generate QR codes for active employees that don't have one
+    const employeesWithQR = await Promise.all(
+      employees.map(async (employee) => {
+        if (employee.isActive && !employee.qrCode) {
+          // Generate QR code for active employee without one
+          const qrCode = await generateQRCode(employee.employeeId)
+          if (qrCode) {
+            // Update employee with QR code
+            await prisma.employee.update({
+              where: { id: employee.id },
+              data: { qrCode }
+            })
+            return { ...employee, qrCode }
+          }
+        }
+        return employee
+      })
+    )
+
     return NextResponse.json({
-      employees,
+      employees: employeesWithQR,
       pagination: {
         page,
         limit,
@@ -135,6 +177,12 @@ export async function POST(request: NextRequest) {
     // Hash the password
     const hashedPassword = await bcrypt.hash(validatedData.password, 12)
 
+    // Generate QR code only for active employees
+    let qrCode: string | null = null
+    if (validatedData.isActive) {
+      qrCode = await generateQRCode(validatedData.employeeId)
+    }
+
     // Create user and employee in a transaction
     const result = await prisma.$transaction(async (tx) => {
       // Create user first
@@ -163,6 +211,7 @@ export async function POST(request: NextRequest) {
           departmentId: validatedData.departmentId,
           scheduleId: validatedData.scheduleId,
           isActive: validatedData.isActive,
+          qrCode: qrCode,
           userId: user.id,
         },
         include: {

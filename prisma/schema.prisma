@@ -71,6 +71,7 @@ model Employee {
   salaryType        String            @default("MONTHLY")
   hireDate          DateTime
   profileImage      String?
+  qrCode            String?
   isActive          Boolean           @default(true)
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt

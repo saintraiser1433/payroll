@@ -2,16 +2,19 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect, lazy, Suspense } from "react"
 import { signIn, getSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { Eye, EyeOff, Lock, Mail } from "lucide-react"
+import { Eye, EyeOff, Lock, Mail, Clock, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ThemeToggle } from "@/components/theme-toggle"
+
+// Lazy load QR scanner to improve initial page load
+const QRScanner = lazy(() => import("@/components/qr-scanner").then(module => ({ default: module.QRScanner })))
 
 export default function SignInPage() {
   const [email, setEmail] = useState("")
@@ -20,7 +23,16 @@ export default function SignInPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const [imageError, setImageError] = useState(false)
+  const [currentTime, setCurrentTime] = useState(new Date())
   const router = useRouter()
+
+  // Update time every second (optimized)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -74,11 +86,37 @@ export default function SignInPage() {
         </svg>
       </div>
 
-      <div className="absolute top-4 right-4 z-30">
+      <div className="absolute top-4 right-4 z-30 flex items-center gap-4">
+        {/* Live Clock */}
+        <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md rounded-lg px-4 py-2 border border-cyan-200/50 dark:border-cyan-700/50 shadow-lg">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+            <div className="text-right">
+              <div className="text-lg font-bold text-cyan-700 dark:text-cyan-300 font-mono">
+                {currentTime.toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: true
+                })}
+              </div>
+              <div className="text-xs text-slate-600 dark:text-slate-400">
+                {currentTime.toLocaleDateString('en-US', {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric'
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
         <ThemeToggle />
       </div>
 
-      <Card className="w-full max-w-md relative z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-2 border-cyan-200/50 dark:border-cyan-700/50 shadow-2xl">
+      <div className="w-full max-w-6xl relative z-20 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Login Form */}
+        <Card className="w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-2 border-cyan-200/50 dark:border-cyan-700/50 shadow-2xl">
         <CardHeader className="text-center space-y-4">
           <div className="relative w-20 h-20 mx-auto">
             <div className="absolute inset-0 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-full blur-lg opacity-50" />
@@ -191,6 +229,21 @@ export default function SignInPage() {
           </div>
         </CardContent>
       </Card>
+
+        {/* QR Scanner - Lazy loaded */}
+        <Suspense fallback={
+          <Card className="w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-2 border-cyan-200/50 dark:border-cyan-700/50 shadow-2xl">
+            <CardContent className="flex items-center justify-center min-h-[400px]">
+              <div className="text-center text-slate-500 dark:text-slate-400">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                <p>Loading QR Scanner...</p>
+              </div>
+            </CardContent>
+          </Card>
+        }>
+          <QRScanner />
+        </Suspense>
+      </div>
 
       <div className="absolute bottom-0 left-0 w-full h-32 z-10 opacity-20">
         <svg viewBox="0 0 1200 120" preserveAspectRatio="none" className="w-full h-full">

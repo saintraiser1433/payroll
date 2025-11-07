@@ -72,6 +72,10 @@ export default withAuth(
         if (req.nextUrl.pathname.startsWith("/auth")) {
           return true
         }
+        // Allow access to QR scan endpoint without token (public endpoint)
+        if (req.nextUrl.pathname.startsWith("/api/attendance/qr-scan")) {
+          return true
+        }
         // Require token for all other pages
         return !!token
       },
@@ -84,12 +88,13 @@ export const config = {
     /*
      * Match all request paths except for the ones starting with:
      * - api/auth (NextAuth API routes)
+     * - api/attendance/qr-scan (Public QR code scanning endpoint)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - static files (images, etc.)
      */
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|logo.png|trop.jpg|placeholder).*)",
+    "/((?!api/auth|api/attendance/qr-scan|_next/static|_next/image|favicon.ico|logo.png|trop.jpg|placeholder).*)",
   ],
 }
 

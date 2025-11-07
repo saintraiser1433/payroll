@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
+import QRCode from 'qrcode'
 
 const employeeUpdateSchema = z.object({
   employeeId: z.string().min(1, 'Employee ID is required').optional(),
@@ -23,6 +24,28 @@ const employeeUpdateSchema = z.object({
   role: z.enum(['EMPLOYEE', 'DEPARTMENT_HEAD']).optional(),
   isActive: z.boolean().optional(),
 })
+
+// Helper function to generate QR code
+async function generateQRCode(employeeId: string): Promise<string | null> {
+  try {
+    // Generate QR code with employee ID
+    const qrCodeDataUrl = await QRCode.toDataURL(employeeId, {
+      errorCorrectionLevel: 'M',
+      type: 'image/png',
+      quality: 0.92,
+      margin: 1,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF',
+      },
+      width: 300,
+    })
+    return qrCodeDataUrl
+  } catch (error) {
+    console.error('Error generating QR code:', error)
+    return null
+  }
+}
 
 // GET /api/employees/[id] - Get single employee
 export async function GET(
@@ -156,12 +179,36 @@ export async function PUT(
     // Prepare employee data (exclude password and role from employee update)
     const { password, role, ...employeeData } = validatedData
 
+    // Handle QR code generation/removal based on isActive status
+    const finalIsActive = validatedData.isActive !== undefined 
+      ? validatedData.isActive 
+      : existingEmployee.isActive
+
+    // Determine if we need to generate or remove QR code
+    let qrCodeUpdate: { qrCode?: string | null } = {}
+    
+    if (finalIsActive) {
+      // Employee is active - generate/regenerate QR code
+      const employeeIdToUse = validatedData.employeeId || existingEmployee.employeeId
+      const qrCode = await generateQRCode(employeeIdToUse)
+      if (qrCode) {
+        qrCodeUpdate.qrCode = qrCode
+      }
+    } else if (validatedData.isActive === false && existingEmployee.isActive) {
+      // Employee is being deactivated - remove QR code
+      qrCodeUpdate.qrCode = null
+    }
+    // If employee is already inactive and staying inactive, don't change QR code
+
     // Update employee and user in a transaction
     const result = await prisma.$transaction(async (tx) => {
       // Update employee
       const employee = await tx.employee.update({
         where: { id },
-        data: employeeData,
+        data: {
+          ...employeeData,
+          ...qrCodeUpdate,
+        },
         include: {
           department: true,
           schedule: true,
