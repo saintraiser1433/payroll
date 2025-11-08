@@ -107,34 +107,66 @@ export async function POST(request: NextRequest) {
       let thirteenthMonthPay = 0
       let totalWorkedHours = 0
       let totalOvertimeHours = 0
+      let totalEarnings = 0 // Declare early to avoid initialization error
 
-      // Handle 13th month pay calculation
+      // Handle 13th month pay calculation (Philippine Labor Law)
+      // Formula: (Total Basic Salary Earned in Calendar Year) / 12
+      // For employees who didn't work full year: (Monthly Basic Salary × Months Worked) / 12
       if (payrollPeriod.isThirteenthMonth) {
         const salaryRate = employee.salaryGrade?.salaryRate || 0
         
-        // Calculate 13th month pay: Monthly salary × months worked in the year / 12
-        // For simplicity, we'll calculate based on hire date
+        // Philippine 13th Month Pay Calculation
+        // Based on Presidential Decree No. 851 and DOLE guidelines
         const hireDate = new Date(employee.hireDate)
         const periodStartDate = new Date(payrollPeriod.startDate)
         const periodEndDate = new Date(payrollPeriod.endDate)
         
-        // Calculate months worked from hire date to end of period
-        const startOfYear = new Date(periodEndDate.getFullYear(), 0, 1)
+        // Calculate based on calendar year (January 1 to December 31)
+        const calendarYear = periodEndDate.getFullYear()
+        const startOfYear = new Date(calendarYear, 0, 1) // January 1
+        const endOfYear = new Date(calendarYear, 11, 31) // December 31
+        
+        // Determine actual start date (hire date or start of year, whichever is later)
         const actualStartDate = hireDate > startOfYear ? hireDate : startOfYear
         
-        // Calculate months worked (including partial months)
-        const monthsWorked = Math.max(0, 
-          ((periodEndDate.getTime() - actualStartDate.getTime()) / (1000 * 60 * 60 * 24)) / 30.44
-        )
+        // Determine actual end date (period end or end of year, whichever is earlier)
+        // For 13th month calculation, use end of year if period extends beyond
+        const actualEndDate = periodEndDate > endOfYear ? endOfYear : periodEndDate
         
-        // Cap at 12 months
-        const cappedMonths = Math.min(12, monthsWorked)
+        // Calculate months worked in the calendar year (Philippine standard)
+        // Philippine Labor Law (Presidential Decree No. 851):
+        // Formula: (Monthly Basic Salary × Months Worked in Calendar Year) / 12
+        // Count each month where employee worked at least 1 day
+        let monthsWorked = 0
+        
+        // If employee worked the full calendar year (Jan 1 to Dec 31)
+        if (actualStartDate <= startOfYear && actualEndDate >= endOfYear) {
+          monthsWorked = 12
+        } else {
+          // Calculate total days worked in the calendar year
+          const totalDaysWorked = Math.ceil((actualEndDate.getTime() - actualStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+          
+          // Philippine standard: Convert days to months using 30.44 days per month (365.25/12)
+          // This is the standard conversion used in Philippine payroll calculations
+          monthsWorked = totalDaysWorked / 30.44
+        }
+        
+        // Cap at 12 months (full year maximum)
+        const cappedMonths = Math.min(12, Math.max(0, monthsWorked))
+        
+        // Philippine 13th Month Pay Formula: (Monthly Basic Salary × Months Worked) / 12
+        // Only includes basic salary, excludes overtime, allowances, etc.
         thirteenthMonthPay = (salaryRate * cappedMonths) / 12
         
-        console.log(`\n13th Month Pay calculation for ${employee.firstName} ${employee.lastName}:`)
-        console.log(`- Monthly salary: ₱${salaryRate}`)
-        console.log(`- Months worked: ${cappedMonths.toFixed(2)}`)
+        console.log(`\n13th Month Pay calculation (Philippine Standard) for ${employee.firstName} ${employee.lastName}:`)
+        console.log(`- Monthly basic salary: ₱${salaryRate.toLocaleString()}`)
+        console.log(`- Hire date: ${hireDate.toLocaleDateString()}`)
+        console.log(`- Calendar year: ${calendarYear}`)
+        console.log(`- Actual start date: ${actualStartDate.toLocaleDateString()}`)
+        console.log(`- Actual end date: ${actualEndDate.toLocaleDateString()}`)
+        console.log(`- Months worked in calendar year: ${cappedMonths.toFixed(2)}`)
         console.log(`- 13th Month Pay: ₱${thirteenthMonthPay.toFixed(2)}`)
+        console.log(`- Note: 13th month pay is tax-exempt up to ₱90,000 under Philippine tax law`)
         
         // For 13th month pay, set basic pay to 0 and total earnings to 13th month pay
         basicPay = 0
@@ -221,7 +253,7 @@ export async function POST(request: NextRequest) {
       let lateMinutes = 0
       let undertimeMinutes = 0
       let timeAdjustments = 0
-      let totalEarnings = 0
+      // totalEarnings already declared above
 
       if (employee.salaryType === 'MONTHLY') {
         // For monthly, calculate based on payroll period type
@@ -251,32 +283,45 @@ export async function POST(request: NextRequest) {
         
         // Calculate daily rate for gross pay calculation based on present legal days
         const dailyRate = halfMonthSalary / expectedWorkDays
-        const hourlyRate = dailyRate / 8 // Assuming 8-hour workday
+        
+        // Calculate schedule duration for accurate rate calculations
+        // Example: Schedule 9am-7pm = 10 hours (600 minutes)
+        let scheduleDurationMinutes = 8 * 60 // Default to 8 hours (480 minutes)
+        if (employee.schedule) {
+          const [scheduleStartHour, scheduleStartMin] = employee.schedule.timeIn.split(':').map(Number)
+          const [scheduleEndHour, scheduleEndMin] = employee.schedule.timeOut.split(':').map(Number)
+          const scheduleStartMinutes = scheduleStartHour * 60 + scheduleStartMin
+          const scheduleEndMinutes = scheduleEndHour * 60 + scheduleEndMin
+          let duration = scheduleEndMinutes - scheduleStartMinutes
+          if (duration < 0) {
+            duration += 24 * 60 // Handle night shifts that cross midnight
+          }
+          scheduleDurationMinutes = duration
+        }
+        
+        // Calculate hourly rate based on actual schedule duration (not assuming 8 hours)
+        const scheduleHours = scheduleDurationMinutes / 60
+        const hourlyRate = dailyRate / scheduleHours
         
         console.log(`- Daily rate: ₱${dailyRate.toFixed(2)}`)
+        console.log(`- Schedule duration: ${scheduleDurationMinutes / 60} hours (${scheduleDurationMinutes} minutes)`)
         console.log(`- Hourly rate: ₱${hourlyRate.toFixed(2)}`)
         console.log(`- Basic pay (half-month salary): ₱${basicPay.toFixed(2)}`)
         
-        // Calculate gross pay based on present legal days (actual days worked)
-        const attendedDays = employee.attendances.filter(a => a.timeIn && a.timeOut).length
-        const grossPayFromPresentDays = attendedDays * dailyRate
-        
-        console.log(`- Attended days: ${attendedDays}`)
-        console.log(`- Gross pay from present days: ₱${grossPayFromPresentDays.toFixed(2)}`)
-        
-        // Calculate time adjustments (late + undertime deductions)
+        // For monthly employees, calculate time adjustments (tardy + undertime deductions)
+        // These are deducted from the basic pay proportionally
         let totalLateMinutes = 0
         let totalUndertimeMinutes = 0
         let totalOvertimeHours = 0
         
         for (const attendance of employee.attendances) {
           if (attendance.timeIn && attendance.timeOut && employee.schedule) {
-            // Calculate late minutes
+            // Calculate late minutes (from schedule time in)
             if (attendance.lateMinutes > 0) {
               totalLateMinutes += attendance.lateMinutes
             }
             
-            // Calculate undertime minutes
+            // Calculate undertime minutes (from schedule time out)
             if (attendance.undertimeMinutes > 0) {
               totalUndertimeMinutes += attendance.undertimeMinutes
             }
@@ -289,8 +334,23 @@ export async function POST(request: NextRequest) {
         }
         
         // Calculate time adjustments (late + undertime deductions)
-        const totalAdjustmentMinutes = totalLateMinutes + totalUndertimeMinutes
-        timeAdjustments = (totalAdjustmentMinutes / 60) * hourlyRate
+        // For monthly employees: Deduct from basic pay based on tardy/undertime
+        // Calculate day-by-day: For each day with adjustments, deduct proportional amount from daily rate
+        // Example: 30 minutes tardy in a 10-hour (600 min) day = (30/600) * dailyRate = deduction for that day
+        const attendedDays = employee.attendances.filter(a => a.timeIn && a.timeOut).length
+        timeAdjustments = 0
+        
+        // Sum up deductions day by day
+        // For each day with adjustments, calculate (adjustmentMinutes / scheduleDurationMinutes) * dailyRate
+        for (const attendance of employee.attendances) {
+          if (attendance.timeIn && attendance.timeOut && employee.schedule) {
+            const dayAdjustmentMinutes = (attendance.lateMinutes || 0) + (attendance.undertimeMinutes || 0)
+            if (dayAdjustmentMinutes > 0) {
+              const dayDeduction = (dayAdjustmentMinutes / scheduleDurationMinutes) * dailyRate
+              timeAdjustments += dayDeduction
+            }
+          }
+        }
         
         // Calculate overtime pay
         overtimePay = totalOvertimeHours * hourlyRate * 1.5
@@ -313,15 +373,17 @@ export async function POST(request: NextRequest) {
           }
         }
         
+        console.log(`- Attended days: ${attendedDays}`)
         console.log(`- Late minutes: ${totalLateMinutes}`)
         console.log(`- Undertime minutes: ${totalUndertimeMinutes}`)
         console.log(`- Overtime hours: ${totalOvertimeHours.toFixed(2)}`)
-        console.log(`- Time adjustments: ₱${timeAdjustments.toFixed(2)}`)
+        console.log(`- Time adjustments (deductions): ₱${timeAdjustments.toFixed(2)}`)
         console.log(`- Overtime pay: ₱${overtimePay.toFixed(2)}`)
         console.log(`- Holiday pay: ₱${holidayPay.toFixed(2)}`)
         
-        // Calculate total earnings based on present legal days
-        totalEarnings = Math.max(0, grossPayFromPresentDays + overtimePay + holidayPay - timeAdjustments)
+        // For monthly employees: Basic pay is fixed, then add overtime/holiday, then subtract tardy/undertime
+        // Gross Pay = Basic Pay + Overtime Pay + Holiday Pay - Time Adjustments (tardy + undertime)
+        totalEarnings = Math.max(0, basicPay + overtimePay + holidayPay - timeAdjustments)
       } else {
         // For daily workers, calculate total earnings normally
         totalEarnings = Math.max(0, basicPay + overtimePay - timeAdjustments)

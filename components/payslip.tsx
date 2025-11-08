@@ -35,6 +35,8 @@ interface PayslipData {
   }>
   totalDeductions: number
   netPay: number
+  tardyDeduction?: number
+  undertimeDeduction?: number
   generatedAt: string
   isThirteenthMonth?: boolean
 }
@@ -174,6 +176,21 @@ export function Payslip({ isOpen, onClose, payslipData }: PayslipProps) {
             <div className="border border-black p-2">
               <div className="text-center font-bold border-b border-black pb-1 mb-2">DEDUCTION</div>
               <div className="space-y-1 text-xs">
+                {/* Show tardy deduction if exists */}
+                {(payslipData.tardyDeduction && payslipData.tardyDeduction > 0) && (
+                  <div className="flex justify-between">
+                    <span>TARDY</span>
+                    <span>{formatCurrency(payslipData.tardyDeduction)}</span>
+                  </div>
+                )}
+                {/* Show undertime deduction if exists */}
+                {(payslipData.undertimeDeduction && payslipData.undertimeDeduction > 0) && (
+                  <div className="flex justify-between">
+                    <span>UNDERTIME</span>
+                    <span>{formatCurrency(payslipData.undertimeDeduction)}</span>
+                  </div>
+                )}
+                {/* Show other deductions */}
                 {payslipData.deductions.length > 0 ? (
                   payslipData.deductions.map((deduction, index) => (
                     <div key={index} className="flex justify-between">
@@ -182,7 +199,10 @@ export function Payslip({ isOpen, onClose, payslipData }: PayslipProps) {
                     </div>
                   ))
                 ) : (
-                  <div className="text-center text-muted-foreground">No deductions</div>
+                  (!payslipData.tardyDeduction || payslipData.tardyDeduction === 0) &&
+                  (!payslipData.undertimeDeduction || payslipData.undertimeDeduction === 0) && (
+                    <div className="text-center text-muted-foreground">No deductions</div>
+                  )
                 )}
               </div>
             </div>
@@ -260,6 +280,19 @@ function generatePayslipHTML(payslipData: PayslipData): string {
       style: 'currency',
       currency: 'PHP'
     }).format(amount)
+  }
+
+  const formatMinutes = (minutes: number) => {
+    if (!minutes || minutes === 0) return '0 min'
+    const hours = Math.floor(minutes / 60)
+    const mins = minutes % 60
+    if (hours > 0 && mins > 0) {
+      return `${hours}h ${mins}m`
+    } else if (hours > 0) {
+      return `${hours}h`
+    } else {
+      return `${mins}m`
+    }
   }
 
   return `
@@ -371,6 +404,18 @@ function generatePayslipHTML(payslipData: PayslipData): string {
             <div class="border p-2">
               <div class="text-center font-bold border-b pb-1 mb-2">DEDUCTION</div>
               <div style="font-size: 10px;">
+                ${(payslipData.tardyDeduction && payslipData.tardyDeduction > 0) ? `
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <span>TARDY</span>
+                  <span>${formatCurrency(payslipData.tardyDeduction)}</span>
+                </div>
+                ` : ''}
+                ${(payslipData.undertimeDeduction && payslipData.undertimeDeduction > 0) ? `
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <span>UNDERTIME</span>
+                  <span>${formatCurrency(payslipData.undertimeDeduction)}</span>
+                </div>
+                ` : ''}
                 ${payslipData.deductions.length > 0 ? 
                   payslipData.deductions.map(deduction => `
                     <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
@@ -378,7 +423,9 @@ function generatePayslipHTML(payslipData: PayslipData): string {
                       <span>${formatCurrency(deduction.amount)}</span>
                     </div>
                   `).join('') : 
-                  '<div style="text-align: center; color: #666;">No deductions</div>'
+                  (!payslipData.tardyDeduction || payslipData.tardyDeduction === 0) &&
+                  (!payslipData.undertimeDeduction || payslipData.undertimeDeduction === 0) ?
+                  '<div style="text-align: center; color: #666;">No deductions</div>' : ''
                 }
               </div>
             </div>

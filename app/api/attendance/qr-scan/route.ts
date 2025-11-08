@@ -146,11 +146,13 @@ export async function POST(request: NextRequest) {
           overtimeMinutes = Math.floor((clockTime.getTime() - scheduleEnd.getTime()) / (1000 * 60))
         }
         
-        const actualWorkMinutes = Math.floor((clockTime.getTime() - attendance.timeIn!.getTime()) / (1000 * 60))
-        const scheduleMinutes = Math.floor((scheduleEnd.getTime() - scheduleStart.getTime()) / (1000 * 60))
-        
-        if (actualWorkMinutes < scheduleMinutes) {
-          undertimeMinutes = scheduleMinutes - actualWorkMinutes
+        // Calculate undertime (clock out before schedule end time)
+        // Undertime = schedule end time - actual clock out time
+        // Example: Schedule 9am-7pm, clock out at 6:30pm = 30 minutes undertime
+        if (clockTime < scheduleEnd) {
+          undertimeMinutes = Math.floor((scheduleEnd.getTime() - clockTime.getTime()) / (1000 * 60))
+        } else {
+          undertimeMinutes = 0
         }
       }
 
