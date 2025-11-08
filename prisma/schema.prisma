@@ -115,34 +115,36 @@ model Attendance {
 }
 
 model PayrollPeriod {
-  id           String        @id @default(cuid())
-  name         String
-  startDate    DateTime
-  endDate      DateTime
-  status       PayrollStatus @default(DRAFT)
-  deductionsEnabled Boolean   @default(true)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  payrollItems PayrollItem[]
+  id                String        @id @default(cuid())
+  name              String
+  startDate         DateTime
+  endDate           DateTime
+  status            PayrollStatus @default(DRAFT)
+  deductionsEnabled Boolean       @default(true)
+  isThirteenthMonth Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  payrollItems      PayrollItem[]
 
   @@map("payroll_periods")
 }
 
 model PayrollItem {
-  id              String             @id @default(cuid())
-  basicPay        Float              @default(0)
-  overtimePay     Float              @default(0)
-  holidayPay      Float              @default(0)
-  totalEarnings   Float              @default(0)
-  totalDeductions Float              @default(0)
-  netPay          Float              @default(0)
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  employeeId      String
-  payrollPeriodId String
-  deductions      PayrollDeduction[]
-  payrollPeriod   PayrollPeriod      @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
-  employee        Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  id                String             @id @default(cuid())
+  basicPay          Float              @default(0)
+  overtimePay       Float              @default(0)
+  holidayPay        Float              @default(0)
+  thirteenthMonthPay Float             @default(0)
+  totalEarnings     Float              @default(0)
+  totalDeductions   Float              @default(0)
+  netPay            Float              @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  employeeId        String
+  payrollPeriodId   String
+  deductions        PayrollDeduction[]
+  payrollPeriod     PayrollPeriod      @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  employee          Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, payrollPeriodId])
   @@map("payroll_items")

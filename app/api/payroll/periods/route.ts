@@ -8,6 +8,7 @@ const payrollPeriodSchema = z.object({
   name: z.string().min(1, 'Period name is required'),
   startDate: z.string().transform((str) => new Date(str)),
   endDate: z.string().transform((str) => new Date(str)),
+  isThirteenthMonth: z.boolean().optional().default(false),
 })
 
 // GET /api/payroll/periods - Get all payroll periods
@@ -239,7 +240,10 @@ export async function POST(request: NextRequest) {
     }
 
     const period = await prisma.payrollPeriod.create({
-      data: validatedData,
+      data: {
+        ...validatedData,
+        isThirteenthMonth: validatedData.isThirteenthMonth || false,
+      },
       include: {
         payrollItems: {
           include: {

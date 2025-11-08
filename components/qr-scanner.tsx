@@ -1,52 +1,12 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Html5Qrcode } from "html5-qrcode"
+// @ts-ignore - qr-scanner doesn't have TypeScript types
+import QrScanner from "qr-scanner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Clock, Coffee, LogOut, LogIn, CheckCircle2, XCircle, Loader2 } from "lucide-react"
-
-// Helper function to safely stop scanner
-const safeStopScanner = async (scanner: Html5Qrcode): Promise<void> => {
-  try {
-    await scanner.stop()
-  } catch (err: any) {
-    // Silently ignore all stop errors
-    if (err?.message && (
-      err.message.includes('removeChild') ||
-      err.message.includes('not a child') ||
-      err.message.includes('already stopped') ||
-      err.message.includes('NotFoundError')
-    )) {
-      return
-    }
-    // Re-throw unexpected errors
-    throw err
-  }
-}
-
-// Helper function to safely clear scanner
-const safeClearScanner = (scanner: Html5Qrcode): void => {
-  try {
-    // Check if element exists
-    if (!document.getElementById("qr-reader")) {
-      return
-    }
-    scanner.clear()
-  } catch (err: any) {
-    // Silently ignore all clear errors
-    if (err?.message && (
-      err.message.includes('removeChild') ||
-      err.message.includes('not a child') ||
-      err.message.includes('NotFoundError')
-    )) {
-      return
-    }
-    // Log unexpected errors but don't throw
-    console.log("Unexpected clear error:", err)
-  }
-}
 
 interface QRScannerProps {
   onScanSuccess?: (employeeId: string) => void
@@ -60,10 +20,13 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
   const [selectedAction, setSelectedAction] = useState<'IN' | 'OUT' | 'BREAK_OUT' | 'BREAK_IN' | null>(null)
   const [pendingAction, setPendingAction] = useState<'IN' | 'OUT' | 'BREAK_OUT' | 'BREAK_IN' | null>(null)
   const [isCameraStarting, setIsCameraStarting] = useState(false)
-  const scannerRef = useRef<Html5Qrcode | null>(null)
+  
+  const scannerRef = useRef<QrScanner | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const scanAreaRef = useRef<HTMLDivElement>(null)
   const isCleaningUpRef = useRef(false)
-  const scannerIdRef = useRef(0)
+  const pendingActionRef = useRef<'IN' | 'OUT' | 'BREAK_OUT' | 'BREAK_IN' | null>(null)
+  const scannedEmployeeIdRef = useRef<string | null>(null)
 
   const startScanning = async () => {
     // Prevent multiple simultaneous start attempts
@@ -74,397 +37,430 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
 
     try {
       setIsCameraStarting(true)
-      // Set scanning state early so buttons appear immediately
       setIsScanning(true)
       setMessage({ type: 'info', text: 'Initializing camera...' })
       
-      // Yield to browser to prevent UI freeze
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-      
-      // Stop any existing scanner first (non-blocking)
-      if (scannerRef.current && !isCleaningUpRef.current) {
-        const prevScanner = scannerRef.current
-        // Don't await - let it happen in background
-        safeStopScanner(prevScanner).catch(() => {})
-        safeClearScanner(prevScanner)
+      // Check if camera is available
+      const hasCamera = await QrScanner.hasCamera()
+      if (!hasCamera) {
+        throw new Error('No camera found. Please connect a camera device.')
+      }
+
+      // Get the container element
+      const element = scanAreaRef.current || document.getElementById("qr-reader")
+      if (!element) {
+        throw new Error("QR reader element not found")
+      }
+
+      // Stop any existing scanner first (before clearing)
+      if (scannerRef.current) {
+        try {
+          // @ts-ignore - qr-scanner API
+          await scannerRef.current.stop().catch(() => {})
+          // @ts-ignore - qr-scanner API
+          scannerRef.current.destroy()
+        } catch (err: any) {
+          // Suppress removeChild errors from qr-scanner cleanup
+          if (!err?.message?.includes('removeChild')) {
+            console.warn('Error stopping scanner:', err)
+          }
+        }
         scannerRef.current = null
       }
 
-      // Yield again
-      await new Promise(resolve => setTimeout(resolve, 50))
+      // Wait a bit for scanner cleanup to complete
+      await new Promise(resolve => setTimeout(resolve, 200))
 
-      isCleaningUpRef.current = false
-      scannerIdRef.current += 1
-      
-      // Ensure the element exists and is clean
-      let element = document.getElementById("qr-reader")
-      if (!element) {
-        // Try to find the element by ref
-        if (scanAreaRef.current) {
-          scanAreaRef.current.id = "qr-reader"
-          element = scanAreaRef.current
-        } else {
-          throw new Error("QR reader element not found")
+      // Clear existing video reference (but don't remove manually - qr-scanner should handle it)
+      if (videoRef.current) {
+        try {
+          const videoEl = videoRef.current
+          videoEl.pause()
+          videoEl.srcObject = null
+        } catch (err) {
+          // Ignore errors
         }
+        videoRef.current = null
       }
-      
-      // Clear the element completely using innerHTML (avoids removeChild issues)
-      if (element) {
-        // Simply clear innerHTML - this is safer than removeChild
-        element.innerHTML = ''
-        // Also remove any attributes that html5-qrcode might have added
-        const attrsToRemove: string[] = []
-        for (let i = 0; i < element.attributes.length; i++) {
-          const attr = element.attributes[i]
-          if (attr.name.startsWith('data-html5-qrcode')) {
-            attrsToRemove.push(attr.name)
-          }
-        }
-        attrsToRemove.forEach(attr => element.removeAttribute(attr))
-      }
-      
-      // Wait a bit for DOM to settle (non-blocking)
-      await new Promise(resolve => setTimeout(resolve, 100))
-      
-      // Verify element still exists and is clean
-      element = document.getElementById("qr-reader")
-      if (!element) {
-        throw new Error("QR reader element not found after cleanup")
-      }
-      
-      // Yield to browser before heavy operations
-      await new Promise(resolve => requestAnimationFrame(resolve))
 
-      // Create scanner instance with error suppression
-      let html5QrCode: Html5Qrcode
-      
+      // Clear the element using innerHTML (simpler and safer)
+      // Set a flag to suppress errors during this operation
       try {
-        // Wrap in try-catch to handle any removeChild errors during construction
-        html5QrCode = new Html5Qrcode("qr-reader")
-        scannerRef.current = html5QrCode
+        element.innerHTML = ''
       } catch (err: any) {
-        // If initialization fails due to removeChild, clear and retry once
-        if (err?.message?.includes('removeChild') || 
-            err?.message?.includes('not a child') ||
-            err?.message?.includes('Failed to execute')) {
-          console.warn('Initialization error (suppressed), retrying...', err.message)
-          element.innerHTML = ''
-          await new Promise(resolve => setTimeout(resolve, 300))
-          
-          // Retry with fresh element
-          try {
-            html5QrCode = new Html5Qrcode("qr-reader")
-            scannerRef.current = html5QrCode
-          } catch (retryErr: any) {
-            // If retry also fails, check if it's removeChild error and ignore it
-            if (retryErr?.message?.includes('removeChild') || 
-                retryErr?.message?.includes('not a child')) {
-              console.warn('Retry also had removeChild error, but continuing...')
-              // Try to create anyway - sometimes it works despite the error
-              html5QrCode = new Html5Qrcode("qr-reader")
-              scannerRef.current = html5QrCode
+        // If innerHTML fails, try removing children
+        try {
+          while (element.firstChild) {
+            const child: Node = element.firstChild
+            if (child.parentNode === element) {
+              element.removeChild(child)
             } else {
-              throw retryErr
+              break
             }
           }
+        } catch (innerErr) {
+          console.warn('Could not clear element:', innerErr)
+        }
+      }
+      
+      // Wait for DOM to settle
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      
+      // Create video element
+      const video = document.createElement('video')
+      video.id = 'qr-scanner-video'
+      video.style.cssText = `
+        width: 100% !important;
+        height: auto !important;
+        min-height: 300px !important;
+        max-height: 600px !important;
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        background: #000 !important;
+        object-fit: contain !important;
+        border-radius: 8px;
+      `
+      video.setAttribute('playsinline', 'true')
+      video.setAttribute('autoplay', 'true')
+      
+      // Append video to element
+      try {
+        element.appendChild(video)
+        videoRef.current = video
+      } catch (err: any) {
+        if (err?.message?.includes('removeChild')) {
+          // Suppress removeChild errors
+          console.warn('Suppressed appendChild error:', err)
         } else {
           throw err
         }
       }
 
-      // Yield again before starting camera (camera access can be slow)
-      await new Promise(resolve => requestAnimationFrame(resolve))
       setMessage({ type: 'info', text: 'Requesting camera access...' })
 
-      // Start scanner with error handling and timeout
-      let scannerStarted = false
+      // Wait a bit to ensure DOM is stable
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+
+      // Create QR scanner instance
+      // @ts-ignore - qr-scanner API
+      const qrScanner = new QrScanner(
+        video,
+        (result: any) => {
+          // QR code scanned successfully
+          console.log('✅ QR Code decoded successfully!', result, typeof result)
+          
+          // Ensure result is a string
+          let employeeId: string
+          if (typeof result === 'string') {
+            employeeId = result
+          } else if (result?.data && typeof result.data === 'string') {
+            employeeId = result.data
+          } else if (result?.toString) {
+            employeeId = result.toString()
+          } else {
+            console.error('Invalid QR code result:', result)
+            setMessage({ type: 'error', text: 'Invalid QR code format. Please try again.' })
+            return
+          }
+          
+          // Prevent multiple scans of the same code (use ref for latest value)
+          if (scannedEmployeeIdRef.current === employeeId) {
+            console.log('Same QR code scanned, ignoring duplicate')
+            return
+          }
+          
+          // Check if an action is selected first using ref (which has latest value)
+          const currentAction = pendingActionRef.current
+          console.log('QR scan callback - Current action from ref:', currentAction, 'Employee ID:', employeeId)
+          
+          if (!currentAction) {
+            console.warn('No action selected when QR code scanned - showing error')
+            setMessage({ 
+              type: 'error', 
+              text: 'Please select an action (Time In, Time Out, Break In, or Break Out) before scanning your QR code.' 
+            })
+            setScannedEmployeeId(null)
+            scannedEmployeeIdRef.current = null
+            return
+          }
+          
+          console.log('✅ QR code scanned with action:', currentAction, 'Employee ID:', employeeId)
+          
+          // Handle the scanned QR code
+          handleQRCodeScanned(employeeId)
+        },
+        {
+          // Use back camera if available (environment = back camera, user = front camera)
+          // 'environment' means rear-facing camera (back camera)
+          preferredCamera: 'environment',
+          // Scan settings
+          maxScansPerSecond: 5,
+          // Highlight scan region (optional)
+          highlightScanRegion: false,
+          highlightCodeOutline: false,
+          // Return detailed scan result for better debugging
+          returnDetailedScanResult: false,
+        } as any
+      )
+
+      scannerRef.current = qrScanner
+
+      // Start scanning - wrap in error handler to catch removeChild errors
+      setMessage({ type: 'info', text: 'Starting camera...' })
       
+      let scannerStarted = false
       try {
-        // Wrap the entire start process in a try-catch to catch any synchronous errors
+        // Wrap the start call to catch any synchronous errors
         const startPromise = (async () => {
           try {
-            await html5QrCode.start(
-              { facingMode: "environment" },
-              {
-                fps: 10,
-                qrbox: { width: 250, height: 250 },
-                aspectRatio: 1.0,
-                disableFlip: false,
-              },
-              (decodedText) => {
-                // QR code scanned successfully
-                console.log('QR Code decoded:', decodedText)
-                // Prevent multiple scans of the same code
-                if (scannedEmployeeId === decodedText) {
-                  return
-                }
-                handleQRCodeScanned(decodedText)
-              },
-              (errorMessage) => {
-                // Ignore scanning errors (they're frequent during scanning)
-                // Only log if it's not a common "not found" error
-                if (!errorMessage.includes("NotFoundException")) {
-                  // Silently ignore common scanning errors
-                }
-              }
-            )
+            // @ts-ignore - qr-scanner API
+            await qrScanner.start()
             return true
           } catch (err: any) {
-            // If it's a removeChild error, suppress it
+            // If it's a removeChild error, check if scanner actually started
             if (err?.message?.includes('removeChild') || 
-                err?.message?.includes('not a child') ||
-                err?.message?.includes('Failed to execute')) {
-              console.warn('Start error suppressed (removeChild):', err.message)
-              // Check if scanner actually started despite the error
-              const videoElement = element?.querySelector('video') as HTMLVideoElement
-              if (videoElement && videoElement.readyState > 0) {
-                return true // Scanner is working
+                err?.message?.includes('not a child')) {
+              console.warn('Suppressed removeChild error during start:', err.message)
+              // Check if video is actually working
+              await new Promise(resolve => setTimeout(resolve, 300))
+              if (video.readyState > 0 || video.videoWidth > 0) {
+                console.log('Scanner appears to be working despite error')
+                return true
               }
-              // If video isn't ready, throw to trigger retry logic
-              throw err
+              // If video isn't working, it's a real error
+              throw new Error('Camera failed to start. Please check permissions and try again.')
             }
             throw err
           }
         })()
         
-        // Add timeout to prevent indefinite hanging
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Camera initialization timeout')), 15000)
-        })
-        
-        try {
-          await Promise.race([startPromise, timeoutPromise])
-          scannerStarted = true
-          
-          // Immediately check if video is ready (sometimes promise resolves before video is ready)
-          setTimeout(() => {
-            const videoElement = element?.querySelector('video') as HTMLVideoElement
-            if (videoElement && videoElement.readyState > 0 && !scannerStarted) {
-              scannerStarted = true
-              setIsScanning(true)
-              setIsCameraStarting(false)
-            }
-          }, 100)
-        } catch (startErr: any) {
-          // If it's a removeChild error, suppress it and check if camera is working
-          if (startErr?.message?.includes('removeChild') || 
-              startErr?.message?.includes('not a child') ||
-              startErr?.message?.includes('Failed to execute')) {
-            console.warn('Start error suppressed (removeChild):', startErr.message)
-            // Check if scanner actually started despite the error
-            const videoElement = element?.querySelector('video') as HTMLVideoElement
-            if (videoElement && videoElement.readyState > 0) {
-              scannerStarted = true
-            }
-          } else if (startErr?.message?.includes('timeout')) {
-            // Even on timeout, check if camera actually started
-            const videoElement = element?.querySelector('video') as HTMLVideoElement
-            if (videoElement && videoElement.readyState > 0) {
-              scannerStarted = true
-              console.log('Camera started despite timeout error')
-            } else {
-              throw new Error('Camera initialization took too long. Please check camera permissions and try again.')
-            }
-          } else {
-            throw startErr
-          }
-        }
-        
-        // Set scanning state immediately if scanner started
-        if (scannerStarted) {
-          setIsScanning(true)
-          setIsCameraStarting(false)
-        }
-        
-        // Poll for video element to detect when camera is actually working
-        // This handles cases where the promise resolves but camera isn't ready yet
-        let pollAttempts = 0
-        const maxPollAttempts = 50 // 5 seconds max (50 * 100ms)
-        
-        const checkVideoReady = () => {
-          pollAttempts++
-          // Try multiple selectors to find the video element
-          const videoElement = element?.querySelector('video') as HTMLVideoElement || 
-                               document.querySelector('#qr-reader video') as HTMLVideoElement ||
-                               document.querySelector('video') as HTMLVideoElement
-          
-          if (videoElement) {
-            // Force video to be visible and properly styled
-            videoElement.style.cssText = `
-              display: block !important;
-              width: 100% !important;
-              height: auto !important;
-              min-height: 300px !important;
-              max-height: 500px !important;
-              object-fit: contain !important;
-              background: transparent !important;
-              margin: 0 auto !important;
-              visibility: visible !important;
-              opacity: 1 !important;
-              z-index: 1 !important;
-            `
-            
-            // Also style the container
-            if (element) {
-              element.style.cssText = `
-                position: relative !important;
-                width: 100% !important;
-                min-height: 300px !important;
-                background: #000 !important;
-                overflow: hidden !important;
-              `
-            }
-            
-            // Check if video is actually playing
-            if (videoElement.readyState > 0 || videoElement.videoWidth > 0) {
-              // Camera is working!
-              setIsScanning(true)
-              setIsCameraStarting(false)
-              
-              console.log('Video element found and styled:', {
-                width: videoElement.videoWidth,
-                height: videoElement.videoHeight,
-                readyState: videoElement.readyState,
-                playing: !videoElement.paused
-              })
-              
-              // Try to play the video if it's paused
-              if (videoElement.paused) {
-                videoElement.play().catch(err => console.warn('Video play error:', err))
-              }
-              
-              // Update message
-              if (pendingAction) {
-                setMessage({ type: 'info', text: `Action: ${getActionName(pendingAction)}. Position your QR code in front of the camera.` })
-              } else {
-                setMessage({ type: 'success', text: 'Camera ready! Select an action below, then scan your QR code.' })
-              }
-              return // Success, stop polling
-            } else if (pollAttempts < maxPollAttempts) {
-              // Video element exists but not ready yet, keep polling
-              setTimeout(checkVideoReady, 100)
-              return
-            }
-          }
-          
-          // Continue polling if we haven't found it yet
-          if (pollAttempts < maxPollAttempts) {
-            setTimeout(checkVideoReady, 100)
-          } else {
-            // Timeout - camera didn't start
-            console.warn('Camera did not start within timeout', {
-              elementExists: !!element,
-              videoElementExists: !!videoElement,
-              pollAttempts
-            })
-            if (!scannerStarted) {
-              setIsCameraStarting(false)
-              setMessage({ type: 'error', text: 'Camera initialization timeout. Please try again.' })
-            }
-          }
-        }
-        
-        // Start polling immediately
-        setTimeout(checkVideoReady, 200)
+        scannerStarted = await startPromise
       } catch (startErr: any) {
-        // If start fails due to removeChild, clean up and show error
-        if (startErr?.message?.includes('removeChild') || startErr?.message?.includes('not a child')) {
-          scannerRef.current = null
-          element.innerHTML = ''
-          setMessage({ type: 'error', text: 'Failed to start scanner. Please try again.' })
+        // Final error handling
+        if (startErr?.message?.includes('removeChild') || 
+            startErr?.message?.includes('not a child')) {
+          console.warn('Suppressed removeChild error:', startErr.message)
+          // Check if video is actually playing despite the error
+          await new Promise(resolve => setTimeout(resolve, 500))
+          if (video.readyState > 0 || video.videoWidth > 0 || !video.paused) {
+            console.log('Video is working, ignoring removeChild error')
+            scannerStarted = true
+          } else {
+            throw new Error('Camera failed to start. Please check permissions and try again.')
+          }
         } else {
           throw startErr
         }
       }
-      } catch (err: any) {
-        console.error("Error starting scanner:", err)
-        setIsCameraStarting(false)
-        setIsScanning(false)
-        let errorMessage = 'Failed to start camera. '
-        if (err?.message?.includes('Permission') || err?.message?.includes('permission')) {
-          errorMessage += 'Please allow camera access and try again.'
-        } else if (err?.message?.includes('NotFound') || err?.message?.includes('not found')) {
-          errorMessage += 'No camera found. Please connect a camera device.'
-        } else if (err?.message?.includes('NotAllowedError') || err?.message?.includes('NotReadableError')) {
-          errorMessage += 'Camera access denied or camera is in use by another application.'
-        } else {
-          errorMessage += `Please check camera permissions and try again. Error: ${err?.message || 'Unknown error'}`
-        }
-        setMessage({ type: 'error', text: errorMessage })
+      
+      if (!scannerStarted) {
+        throw new Error('Scanner failed to start')
       }
+      
+      // Wait a bit for qr-scanner to fully initialize
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Check which camera is being used and apply appropriate transform
+      try {
+        const stream = video.srcObject as MediaStream
+        if (stream) {
+          const videoTrack = stream.getVideoTracks()[0]
+          if (videoTrack) {
+            const settings = videoTrack.getSettings()
+            console.log('Camera settings:', {
+              facingMode: settings.facingMode,
+              width: settings.width,
+              height: settings.height,
+              deviceId: settings.deviceId
+            })
+            
+            // Only flip if using front camera (user-facing)
+            // Front cameras typically need to be mirrored for natural viewing
+            // Back cameras (environment) should not be flipped
+            if (settings.facingMode === 'user') {
+              console.log('Front camera detected - applying horizontal flip for natural viewing')
+              video.style.transform = 'scaleX(-1)'
+              video.style.webkitTransform = 'scaleX(-1)'
+            } else {
+              // Back camera - no flip needed
+              console.log('Back camera detected - no flip needed')
+              video.style.transform = 'none'
+              video.style.webkitTransform = 'none'
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not check camera settings:', err)
+        // Default: no flip (assuming back camera)
+        video.style.transform = 'none'
+        video.style.webkitTransform = 'none'
+      }
+      
+      console.log('✅ Scanner started successfully')
+      setIsCameraStarting(false)
+      setIsScanning(true)
+      setMessage({ type: 'success', text: 'Camera ready! Position your QR code in the scanning box.' })
+      
+    } catch (err: any) {
+      console.error("Error starting scanner:", err)
+      setIsCameraStarting(false)
+      setIsScanning(false)
+      
+      let errorMessage = 'Failed to start camera. '
+      if (err?.message?.includes('Permission') || err?.message?.includes('permission')) {
+        errorMessage += 'Please allow camera access and try again.'
+      } else if (err?.message?.includes('NotFound') || err?.message?.includes('not found') || err?.message?.includes('No camera')) {
+        errorMessage += 'No camera found. Please connect a camera device.'
+      } else if (err?.message?.includes('NotAllowedError') || err?.message?.includes('NotReadableError')) {
+        errorMessage += 'Camera access denied or camera is in use by another application.'
+      } else {
+        errorMessage += `Please check camera permissions and try again. Error: ${err?.message || 'Unknown error'}`
+      }
+      setMessage({ type: 'error', text: errorMessage })
+    }
   }
 
   const stopScanning = async () => {
     if (isCleaningUpRef.current) {
-      return // Already cleaning up
+      return
     }
 
     isCleaningUpRef.current = true
-    
-    if (scannerRef.current) {
-      try {
-        const scanner = scannerRef.current
-        
-        // Check if the DOM element still exists
-        const element = document.getElementById("qr-reader")
-        if (!element) {
-          // Element already removed, just clear the reference
-          scannerRef.current = null
-          isCleaningUpRef.current = false
-          setIsScanning(false)
-          setScannedEmployeeId(null)
-          setSelectedAction(null)
-          return
-        }
 
-        // Safely stop and clear scanner
-        await safeStopScanner(scanner)
-        
-        // Wait a bit before clearing to let DOM settle
-        await new Promise(resolve => setTimeout(resolve, 100))
-        
-        safeClearScanner(scanner)
-      } catch (err) {
-        // Ignore all cleanup errors
-        console.log("Cleanup error (ignored):", err)
-      } finally {
+    try {
+      // Stop scanner
+      if (scannerRef.current) {
+        // @ts-ignore - qr-scanner API
+        await scannerRef.current.stop()
+        // @ts-ignore - qr-scanner API
+        scannerRef.current.destroy()
         scannerRef.current = null
-        isCleaningUpRef.current = false
       }
-    } else {
+
+      // Clean up video element - use safer method
+      if (videoRef.current) {
+        try {
+          const videoEl = videoRef.current
+          videoEl.pause()
+          videoEl.srcObject = null
+          
+          // Safely remove from parent if it exists and is actually a child
+          if (videoEl.parentElement && videoEl.parentElement.contains(videoEl)) {
+            try {
+              videoEl.parentElement.removeChild(videoEl)
+            } catch (removeErr: any) {
+              // If removeChild fails, try remove() method
+              if (videoEl.remove) {
+                videoEl.remove()
+              } else {
+                // Last resort: clear parent's innerHTML (but this might affect other children)
+                console.warn('Could not remove video element safely')
+              }
+            }
+          } else if (videoEl.parentElement) {
+            // Not a child, just clear reference
+            console.warn('Video element is not a child of its parent')
+          }
+        } catch (err) {
+          console.warn('Error cleaning up video element:', err)
+        }
+        videoRef.current = null
+      }
+
+      // Clear container - use safer method
+      const element = scanAreaRef.current || document.getElementById("qr-reader")
+      if (element) {
+        try {
+          // Instead of innerHTML, remove children one by one
+          while (element.firstChild) {
+            try {
+              if (element.firstChild.parentElement === element) {
+                element.removeChild(element.firstChild)
+              } else {
+                element.firstChild.remove?.()
+              }
+            } catch (err) {
+              // If removing fails, break to avoid infinite loop
+              console.warn('Error removing child, using innerHTML fallback')
+              element.innerHTML = ''
+              break
+            }
+          }
+        } catch (err) {
+          // Fallback to innerHTML if individual removal fails
+          try {
+            element.innerHTML = ''
+          } catch (innerErr) {
+            console.warn('Could not clear element:', innerErr)
+          }
+        }
+      }
+    } catch (err) {
+      console.log("Cleanup error (ignored):", err)
+    } finally {
       isCleaningUpRef.current = false
+      setIsScanning(false)
+      setScannedEmployeeId(null)
+      scannedEmployeeIdRef.current = null
+      setSelectedAction(null)
+      pendingActionRef.current = null // Clear ref on stop
     }
-    
-    setIsScanning(false)
-    setScannedEmployeeId(null)
-    setSelectedAction(null)
-    // Don't clear pendingAction here - let user keep their selection
   }
 
-  const handleQRCodeScanned = async (employeeId: string) => {
+  const handleQRCodeScanned = async (employeeId: any) => {
     try {
-      console.log('QR Code scanned - Raw text:', employeeId)
+      console.log('QR Code scanned - Raw value:', employeeId, typeof employeeId)
+      
+      // Ensure employeeId is a string
+      let employeeIdStr: string
+      if (typeof employeeId === 'string') {
+        employeeIdStr = employeeId
+      } else if (employeeId?.data && typeof employeeId.data === 'string') {
+        employeeIdStr = employeeId.data
+      } else if (employeeId?.toString && typeof employeeId.toString === 'function') {
+        employeeIdStr = employeeId.toString()
+      } else {
+        console.error('Invalid employeeId type:', employeeId, typeof employeeId)
+        setMessage({ type: 'error', text: 'Invalid QR code format. Please try again.' })
+        return
+      }
       
       // Validate the scanned text
-      if (!employeeId || employeeId.trim() === '') {
+      if (!employeeIdStr || typeof employeeIdStr.trim !== 'function') {
+        console.error('employeeId is not a valid string:', employeeIdStr)
         setMessage({ type: 'error', text: 'Invalid QR code. Please try again.' })
         return
       }
 
-      const trimmedId = employeeId.trim()
+      const trimmedId = employeeIdStr.trim()
       console.log('QR Code scanned - Trimmed ID:', trimmedId)
       
-      setScannedEmployeeId(trimmedId)
-      stopScanning()
-      
-      // If an action was pre-selected, automatically process it
-      if (pendingAction) {
-        setMessage({ type: 'info', text: `Processing ${getActionName(pendingAction)} for ${trimmedId}...` })
-        await handleAction(pendingAction, trimmedId)
-        setPendingAction(null)
-      } else {
-        setMessage({ type: 'info', text: `QR Code scanned: ${trimmedId}. Select an action below.` })
+      if (trimmedId === '') {
+        setMessage({ type: 'error', text: 'Invalid QR code. Please try again.' })
+        return
       }
+      
+      // Check if an action is selected - REQUIRED (use ref for latest value)
+      const actionToProcess = pendingActionRef.current || pendingAction || selectedAction
+      if (!actionToProcess) {
+        console.error('No action found when processing QR scan')
+        setMessage({ 
+          type: 'error', 
+          text: 'Please select an action (Time In, Time Out, Break In, or Break Out) before scanning your QR code.' 
+        })
+        return
+      }
+      
+      console.log('Processing QR scan with action:', actionToProcess, 'for employee:', trimmedId)
+      setScannedEmployeeId(trimmedId)
+      scannedEmployeeIdRef.current = trimmedId // Update ref
+      
+      // Automatically process the selected action
+      setMessage({ type: 'info', text: `Processing ${getActionName(actionToProcess)} for ${trimmedId}...` })
+      await handleAction(actionToProcess, trimmedId)
+      setPendingAction(null)
+      pendingActionRef.current = null // Clear ref after processing
     } catch (error: any) {
       console.error('Error handling QR code scan:', error)
       const errorMsg = error?.message || 'Failed to process QR code. Please try again.'
@@ -474,8 +470,12 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
 
   const handlePreSelectAction = (type: 'IN' | 'OUT' | 'BREAK_OUT' | 'BREAK_IN') => {
     setPendingAction(type)
+    pendingActionRef.current = type // Update ref so callback can access it
+    setSelectedAction(null) // Clear any previous selection
+    setScannedEmployeeId(null) // Clear any previous scan
     setMessage({ type: 'info', text: `Action selected: ${getActionName(type)}. Now scan your QR code.` })
-    if (!isScanning) {
+    // Automatically start scanner when action is selected
+    if (!isScanning && !isCameraStarting) {
       startScanning()
     }
   }
@@ -525,207 +525,162 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
 
       clearTimeout(timeoutId)
 
-      // Check if response is ok
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Network error' }))
-        throw new Error(errorData.message || errorData.error || `HTTP ${response.status}`)
-      }
-
-      const data = await response.json()
+      // Parse response
+      const data = await response.json().catch(() => ({ 
+        success: false, 
+        error: 'Network error',
+        message: 'Failed to parse server response'
+      }))
+      
       console.log('API Response:', data)
 
-      if (data.success) {
-        setMessage({ 
-          type: 'success', 
-          text: data.message || `${getActionName(type)} successful for ${data.employeeName || employeeId}` 
-        })
-        if (onScanSuccess) {
-          onScanSuccess(employeeId)
-        }
-        // Reset after 3 seconds
-        setTimeout(() => {
-          setScannedEmployeeId(null)
-          setSelectedAction(null)
-          setPendingAction(null)
-          setMessage(null)
-        }, 3000)
-      } else {
-        const errorMessage = data.message || data.error || 'An error occurred'
-        console.error('Attendance error:', errorMessage)
+      // Check if response is ok and data indicates success
+      if (!response.ok || !data.success) {
+        // This is an expected error from the API (like validation errors)
+        const errorMessage = data.message || data.error || `Server error: ${response.status}`
+        console.warn('Attendance API error:', errorMessage)
         setMessage({ type: 'error', text: errorMessage })
         setPendingAction(null)
-        // Don't clear scannedEmployeeId on error so user can try again
+        pendingActionRef.current = null
+        // Don't clear scannedEmployeeId on error so user can try again with different action
+        return
       }
+
+      // Success case
+      setMessage({ 
+        type: 'success', 
+        text: data.message || `${getActionName(type)} successful for ${data.employeeName || employeeId}` 
+      })
+      if (onScanSuccess) {
+        onScanSuccess(employeeId)
+      }
+      // Reset after 3 seconds
+      setTimeout(() => {
+        setScannedEmployeeId(null)
+        scannedEmployeeIdRef.current = null
+        setSelectedAction(null)
+        setPendingAction(null)
+        pendingActionRef.current = null
+        setMessage(null)
+      }, 3000)
     } catch (error: any) {
+      // Handle network errors, timeouts, etc.
       console.error('Error processing attendance:', error)
       
       // Handle different error types
       if (error.name === 'AbortError') {
         setMessage({ type: 'error', text: 'Request timed out. Please try again.' })
-      } else if (error.message) {
+      } else if (error.message && !error.message.includes('JSON')) {
+        // Only show error message if it's not a JSON parse error
         setMessage({ type: 'error', text: error.message })
       } else {
-        setMessage({ type: 'error', text: 'Failed to process attendance. Please try again.' })
+        setMessage({ type: 'error', text: 'Failed to process attendance. Please check your connection and try again.' })
       }
+      
+      setPendingAction(null)
+      pendingActionRef.current = null
     } finally {
       setIsProcessing(false)
       setSelectedAction(null)
     }
   }
 
-  // Set up error handlers globally (always active to catch errors early)
+  // Set up global error handlers to catch removeChild errors - MUST be first
   useEffect(() => {
-    // Set up error handler for removeChild errors
+    // More aggressive error suppression
+    const originalRemoveChild = Node.prototype.removeChild
+    Node.prototype.removeChild = function<T extends Node>(child: T): T {
+      try {
+        // Check if child is actually a child before removing
+        if (this.contains && !this.contains(child)) {
+          console.warn('Prevented removeChild: node is not a child')
+          return child
+        }
+        return originalRemoveChild.call(this, child) as T
+      } catch (err: any) {
+        // If removeChild fails, suppress the error
+        if (err?.message?.includes('not a child') || 
+            err?.message?.includes('removeChild')) {
+          console.warn('Suppressed removeChild error:', err.message)
+          return child
+        }
+        throw err
+      }
+    }
+
     const handleError = (event: ErrorEvent) => {
       const errorMessage = event.message || event.error?.message || event.error?.toString() || ''
-      if (errorMessage.includes('removeChild') || 
-          errorMessage.includes('not a child') ||
-          errorMessage.includes('Failed to execute \'removeChild\'') ||
-          errorMessage.includes('removeChild')) {
-        // Suppress removeChild errors completely
+      const errorStr = errorMessage.toLowerCase()
+      if (
+        errorStr.includes('removechild') ||
+        errorStr.includes('not a child') ||
+        errorStr.includes('failed to execute') ||
+        errorStr.includes('not a child of this node')
+      ) {
+        console.warn('Suppressed removeChild error:', errorMessage)
         event.preventDefault()
         event.stopPropagation()
         event.stopImmediatePropagation()
-        return false // Return false to prevent default error handling
+        return false
       }
-      return true
     }
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason
-      const message = reason?.message || reason?.toString() || ''
-      if (message.includes('removeChild') || 
-          message.includes('not a child') ||
-          message.includes('Failed to execute \'removeChild\'') ||
-          message.includes('removeChild')) {
-        // Suppress removeChild errors
+      const message = (reason?.message || reason?.toString() || '').toLowerCase()
+      if (
+        message.includes('removechild') ||
+        message.includes('not a child') ||
+        message.includes('failed to execute') ||
+        message.includes('not a child of this node')
+      ) {
+        console.warn('Suppressed removeChild rejection:', reason)
         event.preventDefault()
         event.stopPropagation()
         return false
       }
-      return true
     }
 
-    // Add event listeners with capture phase to catch early
     window.addEventListener('error', handleError, true)
     window.addEventListener('unhandledrejection', handleUnhandledRejection as any, true)
 
     return () => {
-      // Remove event listeners on cleanup
+      // Restore original removeChild
+      Node.prototype.removeChild = originalRemoveChild
       window.removeEventListener('error', handleError, true)
       window.removeEventListener('unhandledrejection', handleUnhandledRejection as any, true)
     }
-  }, []) // Always active, no dependencies
+  }, [])
 
-  // Set up styles when scanner is used
-  useEffect(() => {
-    // Only initialize if scanning is active or about to be
-    if (!isScanning && !isCameraStarting) {
-      return
-    }
-    
-    // Add custom styles for html5-qrcode video elements (only once)
-    const styleId = 'qr-scanner-styles'
-    let styleElement = document.getElementById(styleId) as HTMLStyleElement
-    
-    if (!styleElement) {
-      styleElement = document.createElement('style')
-      styleElement.id = styleId
-      document.head.appendChild(styleElement)
-    }
-    
-    styleElement.textContent = `
-      #qr-reader {
-        position: relative !important;
-        width: 100% !important;
-        min-height: 300px !important;
-      }
-      #qr-reader video {
-        width: 100% !important;
-        height: auto !important;
-        min-height: 300px !important;
-        max-height: 500px !important;
-        object-fit: contain !important;
-        display: block !important;
-        background: transparent !important;
-        margin: 0 auto !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        z-index: 1 !important;
-      }
-      #qr-reader__scan_region video {
-        width: 100% !important;
-        height: auto !important;
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-      }
-      #qr-reader__dashboard {
-        display: none !important;
-      }
-      #qr-reader__scan_region {
-        width: 100% !important;
-        height: 100% !important;
-        position: relative !important;
-      }
-      #qr-reader__camera_selection {
-        display: none !important;
-      }
-      #qr-reader__camera_permission_button {
-        display: none !important;
-      }
-      #qr-reader__dashboard_section_csr {
-        display: none !important;
-      }
-      #qr-reader__status {
-        display: none !important;
-      }
-    `
-
-    return () => {
-      // Styles cleanup handled in separate useEffect
-    }
-  }, [isScanning, isCameraStarting])
-
-  // Cleanup styles on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      const styleElement = document.getElementById('qr-scanner-styles')
-      if (styleElement) {
-        styleElement.remove()
-      }
-
-      if (isCleaningUpRef.current) {
-        return // Already cleaning up
-      }
-
-      isCleaningUpRef.current = true
-
       if (scannerRef.current) {
-        const scanner = scannerRef.current
-        
-        // Check if element exists before cleanup
-        const element = document.getElementById("qr-reader")
-        if (!element) {
-          scannerRef.current = null
-          isCleaningUpRef.current = false
-          return
+        try {
+          // @ts-ignore - qr-scanner API
+          scannerRef.current.stop()
+          // @ts-ignore - qr-scanner API
+          scannerRef.current.destroy()
+        } catch (err) {
+          // Ignore cleanup errors
         }
-
-        // Use requestAnimationFrame to ensure DOM is ready
-        requestAnimationFrame(async () => {
-          // Safely stop scanner
-          await safeStopScanner(scanner)
-          
-          // Wait before clearing
-          setTimeout(() => {
-            safeClearScanner(scanner)
-            scannerRef.current = null
-            isCleaningUpRef.current = false
-          }, 50)
-        })
-      } else {
-        isCleaningUpRef.current = false
+      }
+      
+      // Clean up video element
+      if (videoRef.current) {
+        try {
+          const videoEl = videoRef.current
+          videoEl.pause()
+          videoEl.srcObject = null
+          if (videoEl.parentElement && videoEl.parentElement.contains(videoEl)) {
+            videoEl.parentElement.removeChild(videoEl)
+          } else if (videoEl.remove) {
+            videoEl.remove()
+          }
+        } catch (err) {
+          // Ignore cleanup errors
+        }
+        videoRef.current = null
       }
     }
   }, [])
@@ -768,17 +723,12 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
 
         {/* QR Scanner Area */}
         <div className="relative">
-          <div
-            key={`qr-reader-${scannerIdRef.current}`}
-            id="qr-reader"
-            ref={scanAreaRef}
-            className={`w-full ${isScanning ? 'min-h-[300px]' : 'min-h-[200px]'} rounded-lg border-2 border-dashed border-cyan-300 dark:border-cyan-700 ${!isScanning ? 'flex items-center justify-center bg-slate-100 dark:bg-slate-800' : ''}`}
-            style={isScanning ? { 
-              position: 'relative',
-              background: '#000',
-              overflow: 'hidden'
-            } : {}}
-          >
+          <div className="relative w-full">
+            <div
+              id="qr-reader"
+              ref={scanAreaRef}
+              className={`w-full ${isScanning ? 'min-h-[300px]' : 'min-h-[200px]'} rounded-lg border-2 border-dashed border-cyan-300 dark:border-cyan-700 ${!isScanning ? 'flex items-center justify-center bg-slate-100 dark:bg-slate-800' : 'bg-[#1a1a1a]'} relative overflow-hidden`}
+            >
             {!isScanning && !isCameraStarting && (
               <div className="text-center p-8">
                 <div className="w-16 h-16 mx-auto mb-4 bg-cyan-100 dark:bg-cyan-900 rounded-full flex items-center justify-center">
@@ -798,20 +748,54 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
                 </div>
               </div>
             )}
+            
+            {/* QR Code Scanning Box Overlay */}
+            {isScanning && !isCameraStarting && (
+              <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                <div className="relative w-64 h-64 max-w-[80%] max-h-[60%]">
+                  {/* Scanning Frame */}
+                  <div className="absolute inset-0 border-4 border-cyan-400 rounded-lg shadow-2xl shadow-cyan-500/50">
+                    {/* Corner markers */}
+                    <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-cyan-400 rounded-tl-lg"></div>
+                    <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-cyan-400 rounded-tr-lg"></div>
+                    <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-cyan-400 rounded-bl-lg"></div>
+                    <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-cyan-400 rounded-br-lg"></div>
+                  </div>
+                  
+                  {/* Scanning Line Animation */}
+                  <div className="absolute inset-0 overflow-hidden rounded-lg">
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-pulse"></div>
+                    <div 
+                      className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent opacity-80"
+                      style={{
+                        animation: 'scan 2s linear infinite',
+                        top: '0%'
+                      }}
+                    ></div>
+                  </div>
+                  
+                  {/* Instruction Text */}
+                  <div className="absolute -bottom-12 left-1/2 transform -translate-x-1/2 text-center">
+                    {pendingAction ? (
+                      <p className="text-white text-sm font-medium bg-green-600/80 px-4 py-2 rounded-lg backdrop-blur-sm shadow-lg">
+                        ✓ {getActionName(pendingAction)} selected - Scan QR code
+                      </p>
+                    ) : (
+                      <p className="text-white text-sm font-medium bg-orange-600/80 px-4 py-2 rounded-lg backdrop-blur-sm shadow-lg">
+                        ⚠️ Select an action first, then scan
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            </div>
           </div>
         </div>
 
         {/* Scanner Controls */}
         <div className="flex gap-2">
-          {!isScanning ? (
-            <Button
-              onClick={startScanning}
-              className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600"
-            >
-              <LogIn className="mr-2 h-4 w-4" />
-              Start Scanner
-            </Button>
-          ) : (
+          {isScanning ? (
             <Button
               onClick={stopScanning}
               variant="destructive"
@@ -820,25 +804,29 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
               <XCircle className="mr-2 h-4 w-4" />
               Stop Scanner
             </Button>
+          ) : (
+            <div className="flex-1 text-center text-sm text-slate-600 dark:text-slate-400 py-2">
+              Select an action below to start scanning
+            </div>
           )}
         </div>
 
-        {/* Action Buttons - Show when scanning or after scan */}
-        {((isScanning || scannedEmployeeId || isCameraStarting) && !isProcessing) && (
+        {/* Action Buttons - Always show when scanner is available */}
+        {!isProcessing && (
           <div className="space-y-2 pt-4 border-t">
-            {scannedEmployeeId && (
-              <p className="text-sm font-medium text-center text-slate-700 dark:text-slate-300">
-                Employee ID: <span className="font-mono">{scannedEmployeeId}</span>
+            {pendingAction && (
+              <p className="text-sm font-medium text-center text-cyan-600 dark:text-cyan-400 mb-2">
+                ✓ Selected: <span className="font-bold">{getActionName(pendingAction)}</span> - Scan your QR code now
               </p>
             )}
-            {pendingAction && !scannedEmployeeId && (
-              <p className="text-sm font-medium text-center text-cyan-600 dark:text-cyan-400">
-                Selected: {getActionName(pendingAction)} - Scan QR code to proceed
+            {scannedEmployeeId && pendingAction && (
+              <p className="text-sm font-medium text-center text-slate-700 dark:text-slate-300 mb-2">
+                Employee ID: <span className="font-mono font-bold">{scannedEmployeeId}</span>
               </p>
             )}
-            {!scannedEmployeeId && !pendingAction && isScanning && (
-              <p className="text-sm font-medium text-center text-slate-600 dark:text-slate-400">
-                Select an action below, then scan your QR code
+            {!pendingAction && (
+              <p className="text-sm font-medium text-center text-orange-600 dark:text-orange-400 mb-2">
+                ⚠️ Select an action below first, then scan your QR code
               </p>
             )}
             <div className="grid grid-cols-2 gap-2">
@@ -846,14 +834,10 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  if (scannedEmployeeId) {
-                    handleAction('IN')
-                  } else {
-                    handlePreSelectAction('IN')
-                  }
+                  handlePreSelectAction('IN')
                 }}
-                disabled={isProcessing || (selectedAction !== null && selectedAction !== 'IN')}
-                className={`bg-green-600 hover:bg-green-700 text-white ${pendingAction === 'IN' ? 'ring-2 ring-green-400 ring-offset-2' : ''} ${isProcessing && selectedAction === 'IN' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isProcessing}
+                className={`bg-green-600 hover:bg-green-700 text-white ${pendingAction === 'IN' ? 'ring-2 ring-green-400 ring-offset-2 border-2 border-green-300' : ''} ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {isProcessing && selectedAction === 'IN' ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -866,14 +850,10 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  if (scannedEmployeeId) {
-                    handleAction('OUT')
-                  } else {
-                    handlePreSelectAction('OUT')
-                  }
+                  handlePreSelectAction('OUT')
                 }}
-                disabled={isProcessing || (selectedAction !== null && selectedAction !== 'OUT')}
-                className={`bg-red-600 hover:bg-red-700 text-white ${pendingAction === 'OUT' ? 'ring-2 ring-red-400 ring-offset-2' : ''} ${isProcessing && selectedAction === 'OUT' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isProcessing}
+                className={`bg-red-600 hover:bg-red-700 text-white ${pendingAction === 'OUT' ? 'ring-2 ring-red-400 ring-offset-2 border-2 border-red-300' : ''} ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {isProcessing && selectedAction === 'OUT' ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -886,15 +866,11 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  if (scannedEmployeeId) {
-                    handleAction('BREAK_OUT')
-                  } else {
-                    handlePreSelectAction('BREAK_OUT')
-                  }
+                  handlePreSelectAction('BREAK_OUT')
                 }}
-                disabled={isProcessing || (selectedAction !== null && selectedAction !== 'BREAK_OUT')}
+                disabled={isProcessing}
                 variant="outline"
-                className={`border-orange-500 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950 ${pendingAction === 'BREAK_OUT' ? 'ring-2 ring-orange-400 ring-offset-2' : ''} ${isProcessing && selectedAction === 'BREAK_OUT' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`border-orange-500 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950 ${pendingAction === 'BREAK_OUT' ? 'ring-2 ring-orange-400 ring-offset-2 border-2' : ''} ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {isProcessing && selectedAction === 'BREAK_OUT' ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -907,15 +883,11 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  if (scannedEmployeeId) {
-                    handleAction('BREAK_IN')
-                  } else {
-                    handlePreSelectAction('BREAK_IN')
-                  }
+                  handlePreSelectAction('BREAK_IN')
                 }}
-                disabled={isProcessing || (selectedAction !== null && selectedAction !== 'BREAK_IN')}
+                disabled={isProcessing}
                 variant="outline"
-                className={`border-blue-500 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 ${pendingAction === 'BREAK_IN' ? 'ring-2 ring-blue-400 ring-offset-2' : ''} ${isProcessing && selectedAction === 'BREAK_IN' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`border-blue-500 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 ${pendingAction === 'BREAK_IN' ? 'ring-2 ring-blue-400 ring-offset-2 border-2' : ''} ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {isProcessing && selectedAction === 'BREAK_IN' ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -936,7 +908,22 @@ export function QRScanner({ onScanSuccess }: QRScannerProps) {
           </div>
         )}
       </CardContent>
+      
+      <style jsx>{`
+        @keyframes scan {
+          0% {
+            top: 0%;
+            opacity: 0.8;
+          }
+          50% {
+            opacity: 0.4;
+          }
+          100% {
+            top: 100%;
+            opacity: 0.8;
+          }
+        }
+      `}</style>
     </Card>
   )
 }
-

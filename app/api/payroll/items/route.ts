@@ -99,6 +99,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Use include instead of select to avoid Prisma client type issues
+    // This will work even if the Prisma client hasn't been regenerated yet
     const [payrollItems, total] = await Promise.all([
       prisma.payrollItem.findMany({
         where,
@@ -125,15 +127,7 @@ export async function GET(request: NextRequest) {
               }
             }
           },
-          payrollPeriod: {
-            select: {
-              id: true,
-              name: true,
-              startDate: true,
-              endDate: true,
-              status: true
-            }
-          },
+          payrollPeriod: true,
           deductions: {
             include: {
               deductionType: {
@@ -152,8 +146,40 @@ export async function GET(request: NextRequest) {
       prisma.payrollItem.count({ where })
     ])
 
+    // Process items and ensure all fields are present
+    // Handle cases where Prisma client might not recognize new fields yet
+    const processedPayrollItems = payrollItems.map(item => {
+      // Use type assertion to access fields that might exist in DB but not in Prisma client types yet
+      const itemAny = item as any
+      return {
+        id: item.id,
+        basicPay: item.basicPay ?? 0,
+        overtimePay: item.overtimePay ?? 0,
+        holidayPay: item.holidayPay ?? 0,
+        thirteenthMonthPay: itemAny.thirteenthMonthPay ?? 0,
+        totalEarnings: item.totalEarnings ?? 0,
+        totalDeductions: item.totalDeductions ?? 0,
+        netPay: item.netPay ?? 0,
+        createdAt: item.createdAt,
+        employee: item.employee,
+        payrollPeriod: {
+          id: item.payrollPeriod.id,
+          name: item.payrollPeriod.name,
+          startDate: item.payrollPeriod.startDate,
+          endDate: item.payrollPeriod.endDate,
+          status: item.payrollPeriod.status,
+          isThirteenthMonth: (item.payrollPeriod as any).isThirteenthMonth ?? false
+        },
+        deductions: item.deductions.map(deduction => ({
+          id: deduction.id,
+          amount: deduction.amount,
+          deductionType: deduction.deductionType
+        }))
+      }
+    })
+
     return NextResponse.json({
-      payrollItems,
+      payrollItems: processedPayrollItems,
       pagination: {
         page,
         limit,
@@ -163,8 +189,15 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error fetching payroll items:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    console.error('Error details:', { errorMessage, errorStack })
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? errorStack : undefined
+      },
       { status: 500 }
     )
   }

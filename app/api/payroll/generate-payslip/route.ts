@@ -57,15 +57,21 @@ export async function POST(request: NextRequest) {
     const payslipData = {
       companyName: 'DBE Beach Resort',
       companyFullName: 'DBE BEACH RESORT - EMPLOYEE PAYROLL MANAGEMENT SYSTEM',
-      period: payrollItem.payrollPeriod,
+      period: {
+        ...payrollItem.payrollPeriod,
+        isThirteenthMonth: payrollItem.payrollPeriod.isThirteenthMonth
+      },
       employee: payrollItem.employee,
       basicPay: payrollItem.basicPay,
       overtimePay: payrollItem.overtimePay,
+      holidayPay: payrollItem.holidayPay || 0,
+      thirteenthMonthPay: (payrollItem as any).thirteenthMonthPay || 0,
       grossPay: payrollItem.totalEarnings,
       deductions: payrollItem.deductions,
       totalDeductions: payrollItem.totalDeductions,
       netPay: payrollItem.netPay,
-      generatedAt: new Date()
+      generatedAt: new Date(),
+      isThirteenthMonth: payrollItem.payrollPeriod.isThirteenthMonth || false
     }
 
     return NextResponse.json({ payslipData })

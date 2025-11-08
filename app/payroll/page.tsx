@@ -56,6 +56,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -84,6 +85,7 @@ interface PayrollItem {
   basicPay: number
   overtimePay: number
   holidayPay: number
+  thirteenthMonthPay?: number
   totalEarnings: number
   totalDeductions: number
   netPay: number
@@ -106,6 +108,7 @@ interface PayrollItem {
     startDate: string
     endDate: string
     status: string
+    isThirteenthMonth?: boolean
   }
   deductions: Array<{
     id: string
@@ -200,6 +203,7 @@ export default function PayrollPage() {
     name: "",
     startDate: "",
     endDate: "",
+    isThirteenthMonth: false,
   })
   const [exporting, setExporting] = useState(false)
 
@@ -315,15 +319,19 @@ export default function PayrollPage() {
       params.append('limit', itemsPagination.limit.toString())
       
       const response = await fetch(`/api/payroll/items?${params}`)
-      if (!response.ok) throw new Error('Failed to fetch payroll items')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.message || errorData.error || 'Failed to fetch payroll items')
+      }
       
       const data = await response.json()
       setPayrollItems(data.payrollItems || [])
       setItemsPagination(data.pagination || itemsPagination)
     } catch (error) {
+      console.error('Error fetching payroll items:', error)
       toast({
         title: "Error",
-        description: "Failed to fetch payroll items",
+        description: error instanceof Error ? error.message : "Failed to fetch payroll items",
         variant: "destructive",
       })
     }
@@ -350,7 +358,7 @@ export default function PayrollPage() {
       })
 
       setIsCreatePeriodOpen(false)
-      setPeriodForm({ name: "", startDate: "", endDate: "" })
+      setPeriodForm({ name: "", startDate: "", endDate: "", isThirteenthMonth: false })
       fetchPayrollPeriods()
     } catch (error) {
       toast({
@@ -767,6 +775,21 @@ export default function PayrollPage() {
                         required
                       />
                     </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="isThirteenthMonth"
+                        checked={periodForm.isThirteenthMonth}
+                        onCheckedChange={(checked) => setPeriodForm({ ...periodForm, isThirteenthMonth: checked as boolean })}
+                      />
+                      <Label htmlFor="isThirteenthMonth" className="cursor-pointer">
+                        13th Month Pay Period
+                      </Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Check this if this period is for 13th month pay calculation
+                    </p>
                   </div>
 
                   <DialogFooter>
@@ -1479,6 +1502,7 @@ export default function PayrollPage() {
                       <TableHead>Basic Pay</TableHead>
                       <TableHead>Overtime</TableHead>
                       <TableHead>Holiday Pay</TableHead>
+                      <TableHead>13th Month Pay</TableHead>
                       <TableHead>Gross Pay</TableHead>
                       <TableHead>Deductions</TableHead>
                       <TableHead>Net Pay</TableHead>
@@ -1524,6 +1548,7 @@ export default function PayrollPage() {
                         <TableCell>{formatCurrency(item.basicPay)}</TableCell>
                         <TableCell>{formatCurrency(item.overtimePay)}</TableCell>
                         <TableCell>{formatCurrency(item.holidayPay)}</TableCell>
+                        <TableCell>{formatCurrency(item.thirteenthMonthPay || 0)}</TableCell>
                         <TableCell className="font-medium">
                           {formatCurrency(item.totalEarnings)}
                         </TableCell>
@@ -1670,6 +1695,12 @@ export default function PayrollPage() {
                       <span>Holiday Pay</span>
                       <span className="font-medium">{formatCurrency(viewingItem.holidayPay)}</span>
                     </div>
+                    {viewingItem.thirteenthMonthPay && viewingItem.thirteenthMonthPay > 0 && (
+                      <div className="flex justify-between">
+                        <span>13th Month Pay</span>
+                        <span className="font-medium">{formatCurrency(viewingItem.thirteenthMonthPay)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between border-t pt-2">
                       <span className="font-semibold">Total Earnings</span>
                       <span className="font-semibold">{formatCurrency(viewingItem.totalEarnings)}</span>

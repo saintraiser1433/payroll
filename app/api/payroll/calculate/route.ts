@@ -104,9 +104,102 @@ export async function POST(request: NextRequest) {
       let basicPay = 0
       let overtimePay = 0
       let holidayPay = 0
+      let thirteenthMonthPay = 0
       let totalWorkedHours = 0
       let totalOvertimeHours = 0
 
+      // Handle 13th month pay calculation
+      if (payrollPeriod.isThirteenthMonth) {
+        const salaryRate = employee.salaryGrade?.salaryRate || 0
+        
+        // Calculate 13th month pay: Monthly salary × months worked in the year / 12
+        // For simplicity, we'll calculate based on hire date
+        const hireDate = new Date(employee.hireDate)
+        const periodStartDate = new Date(payrollPeriod.startDate)
+        const periodEndDate = new Date(payrollPeriod.endDate)
+        
+        // Calculate months worked from hire date to end of period
+        const startOfYear = new Date(periodEndDate.getFullYear(), 0, 1)
+        const actualStartDate = hireDate > startOfYear ? hireDate : startOfYear
+        
+        // Calculate months worked (including partial months)
+        const monthsWorked = Math.max(0, 
+          ((periodEndDate.getTime() - actualStartDate.getTime()) / (1000 * 60 * 60 * 24)) / 30.44
+        )
+        
+        // Cap at 12 months
+        const cappedMonths = Math.min(12, monthsWorked)
+        thirteenthMonthPay = (salaryRate * cappedMonths) / 12
+        
+        console.log(`\n13th Month Pay calculation for ${employee.firstName} ${employee.lastName}:`)
+        console.log(`- Monthly salary: ₱${salaryRate}`)
+        console.log(`- Months worked: ${cappedMonths.toFixed(2)}`)
+        console.log(`- 13th Month Pay: ₱${thirteenthMonthPay.toFixed(2)}`)
+        
+        // For 13th month pay, set basic pay to 0 and total earnings to 13th month pay
+        basicPay = 0
+        overtimePay = 0
+        holidayPay = 0
+        totalEarnings = thirteenthMonthPay
+        
+        // Create or update payroll item for 13th month pay
+        const existingPayrollItem = await prisma.payrollItem.findUnique({
+          where: {
+            employeeId_payrollPeriodId: {
+              employeeId: employee.id,
+              payrollPeriodId: payrollPeriodId
+            }
+          }
+        })
+
+        let payrollItem
+        if (existingPayrollItem) {
+          payrollItem = await prisma.payrollItem.update({
+            where: { id: existingPayrollItem.id },
+            data: {
+              basicPay: 0,
+              overtimePay: 0,
+              holidayPay: 0,
+              thirteenthMonthPay,
+              totalEarnings: thirteenthMonthPay,
+              totalDeductions: 0, // 13th month pay is typically tax-free or has minimal deductions
+              netPay: thirteenthMonthPay
+            }
+          })
+        } else {
+          payrollItem = await prisma.payrollItem.create({
+            data: {
+              employeeId: employee.id,
+              payrollPeriodId: payrollPeriodId,
+              basicPay: 0,
+              overtimePay: 0,
+              holidayPay: 0,
+              thirteenthMonthPay,
+              totalEarnings: thirteenthMonthPay,
+              totalDeductions: 0,
+              netPay: thirteenthMonthPay
+            }
+          })
+        }
+
+        payrollItems.push({
+          ...payrollItem,
+          employee: {
+            id: employee.id,
+            employeeId: employee.employeeId,
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            position: employee.position
+          },
+          totalWorkedHours: 0,
+          totalOvertimeHours: 0,
+          cashAdvanceTotal: 0
+        })
+
+        continue // Skip to next employee
+      }
+
+      // Regular payroll calculation continues below
       for (const attendance of employee.attendances) {
         if (attendance.timeIn && attendance.timeOut) {
           // Calculate worked hours
@@ -238,6 +331,7 @@ export async function POST(request: NextRequest) {
       const safeBasicPay = isNaN(basicPay) ? 0 : basicPay
       const safeOvertimePay = isNaN(overtimePay) ? 0 : overtimePay
       const safeHolidayPay = isNaN(holidayPay) ? 0 : holidayPay
+      const safeThirteenthMonthPay = isNaN(thirteenthMonthPay) ? 0 : thirteenthMonthPay
       const safeTotalEarnings = isNaN(totalEarnings) ? 0 : totalEarnings
 
       // Log time adjustments for debugging
@@ -383,6 +477,7 @@ export async function POST(request: NextRequest) {
             basicPay: safeBasicPay,
             overtimePay: safeOvertimePay,
             holidayPay: safeHolidayPay,
+            thirteenthMonthPay: safeThirteenthMonthPay,
             totalEarnings: safeTotalEarnings,
             totalDeductions,
             netPay
@@ -402,6 +497,7 @@ export async function POST(request: NextRequest) {
             basicPay: safeBasicPay,
             overtimePay: safeOvertimePay,
             holidayPay: safeHolidayPay,
+            thirteenthMonthPay: safeThirteenthMonthPay,
             totalEarnings: safeTotalEarnings,
             totalDeductions,
             netPay
