@@ -1,6 +1,260 @@
 import bcrypt from "bcryptjs"
 import { prisma } from "./prisma"
 
+// Helper function to generate random employee names
+const firstNames = [
+  "Michael", "Christopher", "Jessica", "Matthew", "Ashley", "Jennifer", "Joshua", 
+  "Amanda", "Daniel", "David", "James", "Robert", "John", "Joseph", "Andrew",
+  "Ryan", "Brandon", "Jason", "Justin", "Sarah", "William", "Jonathan", 
+  "Stephanie", "Brian", "Nicole", "Nicholas", "Anthony", "Heather", "Eric",
+  "Elizabeth", "Adam", "Megan", "Melissa", "Kevin", "Steven", "Thomas",
+  "Timothy", "Christina", "Kyle", "Rachel", "Laura", "Lauren", "Amber",
+  "Brittany", "Danielle", "Richard", "Kimberly", "Jeffrey", "Amy", "Angela"
+]
+
+const lastNames = [
+  "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
+  "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Wilson", "Anderson",
+  "Thomas", "Taylor", "Moore", "Jackson", "Martin", "Lee", "Thompson",
+  "White", "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson",
+  "Walker", "Young", "Allen", "King", "Wright", "Scott", "Torres",
+  "Nguyen", "Hill", "Flores", "Green", "Adams", "Nelson", "Baker",
+  "Hall", "Rivera", "Campbell", "Mitchell", "Carter", "Roberts", "Gomez"
+]
+
+function getRandomElement<T>(array: T[]): T {
+  return array[Math.floor(Math.random() * array.length)]
+}
+
+function getRandomInt(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+// Function to seed IT employees and their attendance
+export async function seedITEmployees() {
+  try {
+    console.log("Starting IT employee seeding...")
+
+    // Get or create IT department
+    const itDepartment = await prisma.department.upsert({
+      where: { name: "IT" },
+      update: {},
+      create: {
+        name: "IT",
+        description: "Information Technology Department",
+      },
+    })
+
+    // Create or get schedule for 8:00 AM to 6:00 PM
+    let itSchedule = await prisma.schedule.findFirst({
+      where: { 
+        timeIn: "08:00",
+        timeOut: "18:00"
+      }
+    })
+
+    if (!itSchedule) {
+      itSchedule = await prisma.schedule.create({
+        data: {
+          name: "IT Department Schedule",
+          timeIn: "08:00",
+          timeOut: "18:00",
+          workingDays: "MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY",
+        },
+      })
+    }
+
+    // Get or create salary grade for IT employees
+    const itSalaryGrade = await prisma.salaryGrade.upsert({
+      where: { grade: "IT001" },
+      update: {},
+      create: {
+        grade: "IT001",
+        description: "IT Department Grade",
+        salaryRate: 60000,
+      },
+    })
+
+    // IT positions
+    const positions = [
+      "Software Developer", "Senior Software Developer", "Frontend Developer",
+      "Backend Developer", "Full Stack Developer", "DevOps Engineer",
+      "System Administrator", "Network Engineer", "Database Administrator",
+      "IT Support Specialist", "QA Engineer", "UI/UX Designer",
+      "Software Architect", "Technical Lead", "IT Project Manager"
+    ]
+
+    // Create 50 IT employees
+    const employees = []
+    const defaultPassword = await bcrypt.hash("password123", 12)
+
+    for (let i = 1; i <= 50; i++) {
+      const firstName = getRandomElement(firstNames)
+      const lastName = getRandomElement(lastNames)
+      const employeeId = `IT${String(i).padStart(3, "0")}`
+      const email = `it.employee${i}@pyrol.com`
+      const position = getRandomElement(positions)
+
+      // Check if employee already exists
+      const existingEmployee = await prisma.employee.findUnique({
+        where: { employeeId }
+      })
+
+      if (existingEmployee) {
+        console.log(`Employee ${employeeId} already exists, skipping...`)
+        employees.push(existingEmployee)
+        continue
+      }
+
+      // Create user
+      const user = await prisma.user.create({
+        data: {
+          email,
+          password: defaultPassword,
+          role: "EMPLOYEE",
+        },
+      })
+
+      // Create employee
+      const employee = await prisma.employee.create({
+        data: {
+          employeeId,
+          firstName,
+          lastName,
+          email,
+          phone: `+63 9${getRandomInt(10, 99)} ${getRandomInt(100, 999)} ${getRandomInt(1000, 9999)}`,
+          position,
+          salaryType: "MONTHLY",
+          hireDate: new Date(2024, getRandomInt(0, 11), getRandomInt(1, 28)),
+          departmentId: itDepartment.id,
+          scheduleId: itSchedule.id,
+          salaryGradeId: itSalaryGrade.id,
+          userId: user.id,
+        },
+      })
+
+      employees.push(employee)
+      console.log(`Created employee ${employeeId}: ${firstName} ${lastName}`)
+    }
+
+    console.log(`Created ${employees.length} IT employees`)
+
+    // Create attendance records for Dec 1-15, 2024
+    const startDate = new Date(2024, 11, 1) // December 1, 2024 (month is 0-indexed)
+    const endDate = new Date(2024, 11, 15) // December 15, 2024
+
+    console.log("Creating attendance records from Dec 1-15, 2024...")
+
+    for (const employee of employees) {
+      const currentDate = new Date(startDate)
+
+      while (currentDate <= endDate) {
+        // Skip weekends (Saturday = 6, Sunday = 0)
+        const dayOfWeek = currentDate.getDay()
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+          currentDate.setDate(currentDate.getDate() + 1)
+          continue
+        }
+
+        // Check if attendance already exists
+        const existingAttendance = await prisma.attendance.findUnique({
+          where: {
+            employeeId_date: {
+              employeeId: employee.id,
+              date: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate())
+            }
+          }
+        })
+
+        if (existingAttendance) {
+          currentDate.setDate(currentDate.getDate() + 1)
+          continue
+        }
+
+        // Schedule: 8:00 AM to 6:00 PM
+        const scheduledTimeIn = 8 // 8:00 AM
+        const scheduledTimeOut = 18 // 6:00 PM (18:00)
+
+        // Random late arrival: 0-60 minutes after 8:00 AM (30% chance of being late)
+        const isLate = Math.random() < 0.3
+        const lateMinutes = isLate ? getRandomInt(5, 60) : 0
+        const timeInMinutes = lateMinutes
+        const timeInHour = scheduledTimeIn + Math.floor(timeInMinutes / 60)
+        const timeInMinute = timeInMinutes % 60
+
+        // Break out: around 12:00 PM (11:45 AM - 12:15 PM)
+        const breakOutOffset = getRandomInt(-15, 15) // -15 to +15 minutes
+        let breakOutHour = 12
+        let breakOutMinute = breakOutOffset
+        if (breakOutMinute < 0) {
+          breakOutHour = 11
+          breakOutMinute = 60 + breakOutMinute // e.g., -15 becomes 45
+        }
+
+        // Break in: around 1:00 PM (12:45 PM - 1:15 PM) - 1 hour lunch break
+        const breakInOffset = getRandomInt(-15, 15) // -15 to +15 minutes
+        let breakInHour = 13
+        let breakInMinute = breakInOffset
+        if (breakInMinute < 0) {
+          breakInHour = 12
+          breakInMinute = 60 + breakInMinute // e.g., -15 becomes 45
+        }
+
+        // Random undertime: 0-60 minutes before 6:00 PM (25% chance of undertime)
+        const hasUndertime = Math.random() < 0.25
+        const undertimeMinutes = hasUndertime ? getRandomInt(15, 60) : 0
+        const timeOutTotalMinutes = scheduledTimeOut * 60 - undertimeMinutes // 6:00 PM = 1080 minutes
+        const timeOutHour = Math.floor(timeOutTotalMinutes / 60)
+        const timeOutMinute = timeOutTotalMinutes % 60
+
+        // Create date objects
+        const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate())
+        const timeIn = new Date(date.getFullYear(), date.getMonth(), date.getDate(), timeInHour, timeInMinute)
+        const breakOut = new Date(date.getFullYear(), date.getMonth(), date.getDate(), breakOutHour, breakOutMinute)
+        const breakIn = new Date(date.getFullYear(), date.getMonth(), date.getDate(), breakInHour, breakInMinute)
+        const timeOut = new Date(date.getFullYear(), date.getMonth(), date.getDate(), timeOutHour, timeOutMinute)
+
+        // Calculate break minutes
+        const breakMinutes = Math.floor((breakIn.getTime() - breakOut.getTime()) / (1000 * 60))
+
+        // Determine status
+        let status: "PRESENT" | "LATE" = "PRESENT"
+        if (lateMinutes > 0) {
+          status = "LATE"
+        }
+
+        // Create attendance record
+        await prisma.attendance.create({
+          data: {
+            employeeId: employee.id,
+            date,
+            timeIn,
+            breakOut,
+            breakIn,
+            timeOut,
+            status,
+            lateMinutes,
+            undertimeMinutes,
+            overtimeMinutes: 0,
+            breakMinutes,
+          },
+        })
+
+        currentDate.setDate(currentDate.getDate() + 1)
+      }
+    }
+
+    console.log("Attendance records created successfully!")
+    console.log(`Created attendance for ${employees.length} employees from Dec 1-15, 2024`)
+    console.log("Schedule: 8:00 AM - 6:00 PM")
+    console.log("Includes random late arrivals and undertime")
+
+  } catch (error) {
+    console.error("Error seeding IT employees:", error)
+    throw error
+  }
+}
+
 export async function seedDatabase() {
   try {
     // Create admin user
@@ -304,6 +558,9 @@ export async function seedDatabase() {
     console.log("Employee: employee@pyrol.com / emp123")
     console.log("Sample attendance records created for testing")
     console.log("Sample payroll data created for testing")
+
+    // Seed IT employees and attendance
+    await seedITEmployees()
 
   } catch (error) {
     console.error("Error seeding database:", error)
